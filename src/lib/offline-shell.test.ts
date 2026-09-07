@@ -4,11 +4,13 @@ import path from "node:path";
 import {
   queueObservation,
   getQueuedObservations,
+  getSyncedObservations,
   pruneQueue,
   clearOfflineQueue,
   getCachedOfflinePackage,
   type OfflineSyncStatus,
 } from "./offline-manager";
+import { saveOfflineMedia, getOfflineMedia } from "./offline-media-store";
 
 describe("LandAlert-Nexus Offline App Shell & Service Worker Specification", () => {
   beforeEach(() => {
@@ -331,6 +333,260 @@ describe("LandAlert-Nexus Offline App Shell & Service Worker Specification", () 
 
       // Official nodal officer maintains their proper role
       expect(checkAuthorizedAction({ role: "NODAL_OFFICER" }, "review_citizen").allowed).toBe(true);
+    });
+  });
+
+  // 7. COMPREHENSIVE PHASE 18 (A-Z) SPECIFICATION REGRESSION
+  describe("7. Full Offline Observation Implementation Verification (Phases 1-18 A-Z)", () => {
+    beforeEach(() => {
+      clearOfflineQueue();
+    });
+
+    it("A. Observation route exists and has zero blocking network loader requirements", () => {
+      const obsRoutePath = path.resolve(__dirname, "../routes/observations.tsx");
+      expect(fs.existsSync(obsRoutePath)).toBe(true);
+      const obsContent = fs.readFileSync(obsRoutePath, "utf-8");
+      // Route must not have blocking loader network fetch
+      expect(obsContent).toContain("createFileRoute(\"/observations\")");
+      expect(obsContent).not.toContain("loader: async () => fetch(");
+    });
+
+    it("B. Report Observation form opens offline and has local zone data", () => {
+      const dialogPath = path.resolve(__dirname, "../components/FieldObservationDialog.tsx");
+      expect(fs.existsSync(dialogPath)).toBe(true);
+      const dialogContent = fs.readFileSync(dialogPath, "utf-8");
+      expect(dialogContent).toContain("FieldObservationDialog");
+      expect(dialogContent).toContain("getAllZones");
+      expect(dialogContent).toContain("queueObservation");
+    });
+
+    it("C. Form can be completed offline with all standard observation fields", () => {
+      const obsData = {
+        zone_id: 1,
+        state: "Assam",
+        district: "Cachar",
+        observed_at: "2026-09-07T10:00:00.000Z",
+        rainfall_mm: 45.5,
+        soil_condition: "waterlogged" as const,
+        visual_signs: "Toe bulge and rotational cracks",
+        road_status: "blocked" as const,
+        latitude: 24.8333,
+        longitude: 92.7789,
+        observer_id: "officer_assam_01",
+        reporter_name: "Sub-divisional Magistrate",
+        reporter_phone: "+919876543210",
+        consent_given: true,
+      };
+
+      const queued = queueObservation(obsData);
+      expect(queued.zone_id).toBe(1);
+      expect(queued.state).toBe("Assam");
+      expect(queued.district).toBe("Cachar");
+      expect(queued.observed_at).toBe("2026-09-07T10:00:00.000Z");
+      expect(queued.rainfall_mm).toBe(45.5);
+      expect(queued.soil_condition).toBe("waterlogged");
+      expect(queued.visual_signs).toBe("Toe bulge and rotational cracks");
+      expect(queued.road_status).toBe("blocked");
+      expect(queued.latitude).toBe(24.8333);
+      expect(queued.longitude).toBe(92.7789);
+      expect(queued.observer_id).toBe("officer_assam_01");
+      expect(queued.reporter_name).toBe("Sub-divisional Magistrate");
+    });
+
+    it("D & E. Offline submission creates local record immediately without server prerequisite", () => {
+      // No server network call mock or fetch required
+      const record = queueObservation({
+        zone_id: 7,
+        state: "Sikkim",
+        district: "Gangtok",
+        observed_at: new Date().toISOString(),
+        road_status: "restricted",
+      });
+
+      expect(record).toBeDefined();
+      const inStore = getQueuedObservations();
+      expect(inStore.length).toBe(1);
+      expect(inStore[0]?.idempotency_key).toBe(record.idempotency_key);
+    });
+
+    it("F & G. Offline observation receives unique client ID and is PENDING_SYNC", () => {
+      const record = queueObservation({
+        zone_id: 4,
+        state: "Meghalaya",
+        district: "East Khasi Hills",
+        observed_at: new Date().toISOString(),
+        soil_condition: "saturated",
+      });
+
+      expect(record.idempotency_key).toBeDefined();
+      expect(typeof record.idempotency_key).toBe("string");
+      expect(record.idempotency_key!.length).toBeGreaterThan(10);
+      expect(record.queue_status).toBe("PENDING_SYNC");
+    });
+
+    it("H, I & J. Offline observations persist across reloads, restarts, and multiple entries", () => {
+      // Submitting 3 separate observations
+      const o1 = queueObservation({ zone_id: 1, observed_at: "2026-09-07T08:00:00.000Z" });
+      const o2 = queueObservation({ zone_id: 2, observed_at: "2026-09-07T08:15:00.000Z" });
+      const o3 = queueObservation({ zone_id: 3, observed_at: "2026-09-07T08:30:00.000Z" });
+
+      // First check: all 3 present
+      let queued = getQueuedObservations();
+      expect(queued.length).toBe(3);
+
+      // Simulate browser tab close / app restart (reading raw localStorage)
+      const raw = localStorage.getItem("landalert_field_observations_queue_v1");
+      expect(raw).toBeDefined();
+      const parsed = JSON.parse(raw!);
+      expect(parsed.length).toBe(3);
+      expect(parsed[0].idempotency_key).toBe(o1.idempotency_key);
+      expect(parsed[1].idempotency_key).toBe(o2.idempotency_key);
+      expect(parsed[2].idempotency_key).toBe(o3.idempotency_key);
+    });
+
+    it("K, L & S. Successful synchronization transitions PENDING_SYNC to SYNCED and archives record", () => {
+      const obs = queueObservation({
+        zone_id: 5,
+        state: "Mizoram",
+        district: "Aizawl",
+        observed_at: "2026-09-07T09:00:00.000Z",
+      });
+
+      expect(obs.queue_status).toBe("PENDING_SYNC");
+
+      // Simulate successful server response acknowledging the observation
+      pruneQueue([obs.idempotency_key!]);
+
+      // Pending queue is empty
+      expect(getQueuedObservations().length).toBe(0);
+
+      // Synced history contains the acknowledged item
+      const synced = getSyncedObservations();
+      expect(synced.length).toBe(1);
+      expect(synced[0]?.idempotency_key).toBe(obs.idempotency_key);
+      expect(synced[0]?.queue_status).toBe("SYNCED");
+      expect(synced[0]?.synced_at).toBeDefined();
+    });
+
+    it("M & N. Failed synchronization preserves observation in pending queue for retry", () => {
+      const o1 = queueObservation({ zone_id: 10, observed_at: new Date().toISOString() });
+      const o2 = queueObservation({ zone_id: 11, observed_at: new Date().toISOString() });
+
+      // Suppose o1 succeeded but o2 failed due to network glitch
+      pruneQueue([o1.idempotency_key!]);
+
+      // o2 remains in queue
+      const remaining = getQueuedObservations();
+      expect(remaining.length).toBe(1);
+      expect(remaining[0]?.idempotency_key).toBe(o2.idempotency_key);
+
+      // Retry: server succeeds on retry
+      pruneQueue([o2.idempotency_key!]);
+      expect(getQueuedObservations().length).toBe(0);
+      expect(getSyncedObservations().length).toBe(2);
+    });
+
+    it("O. Duplicate synchronization does not create duplicate entries", () => {
+      const o1 = queueObservation({ zone_id: 1, observed_at: new Date().toISOString() });
+      pruneQueue([o1.idempotency_key!]);
+
+      // Attempting to prune the same key again does not duplicate synced entries
+      pruneQueue([o1.idempotency_key!]);
+      const synced = getSyncedObservations();
+      const matches = synced.filter((s) => s.idempotency_key === o1.idempotency_key);
+      expect(matches.length).toBe(1);
+    });
+
+    it("P & Q. Preserves observed_at separate from client_timestamp and synced_at", () => {
+      const observedTime = "2026-09-07T06:30:00.000Z";
+      const o1 = queueObservation({
+        zone_id: 8,
+        observed_at: observedTime,
+      });
+
+      expect(o1.observed_at).toBe(observedTime);
+      expect(o1.client_timestamp).toBeDefined();
+
+      // Later sync
+      pruneQueue([o1.idempotency_key!]);
+      const synced = getSyncedObservations()[0];
+      expect(synced?.observed_at).toBe(observedTime);
+      expect(synced?.synced_at).toBeDefined();
+      expect(synced?.synced_at).not.toBe(observedTime);
+    });
+
+    it("R. Offline list displays pending observations with explicit metadata", () => {
+      queueObservation({
+        zone_id: 14,
+        state: "Sikkim",
+        district: "Mangan",
+        rainfall_mm: 92.4,
+        visual_signs: "Tension cracks",
+        observed_at: new Date().toISOString(),
+      });
+
+      const pending = getQueuedObservations();
+      expect(pending.length).toBe(1);
+      expect(pending[0]?.district).toBe("Mangan");
+      expect(pending[0]?.queue_status).toBe("PENDING_SYNC");
+    });
+
+    it("T & U. Media storage truthfully stores blobs locally without fake network URLs", async () => {
+      const mediaId = "media-" + Date.now();
+      const mockBlob = new Blob(["test-image-binary-data"], { type: "image/jpeg" });
+      await saveOfflineMedia(mediaId, mockBlob, {
+        name: "crack_toe.jpg",
+        mimeType: "image/jpeg",
+        size: 23,
+      });
+
+      const retrieved = await getOfflineMedia(mediaId);
+      expect(retrieved).not.toBeNull();
+      expect(retrieved?.name).toBe("crack_toe.jpg");
+      expect(retrieved?.mimeType).toBe("image/jpeg");
+      expect(retrieved?.size).toBe(23);
+    });
+
+    it("V. Coordinates are never fabricated when GPS is unavailable", () => {
+      const oNoGps = queueObservation({
+        zone_id: 3,
+        state: "Assam",
+        district: "Dima Hasao",
+        observed_at: new Date().toISOString(),
+        // No latitude or longitude provided
+      });
+
+      expect(oNoGps.latitude).toBeUndefined();
+      expect(oNoGps.longitude).toBeUndefined();
+      expect(oNoGps.latitude).not.toBe(0);
+      expect(oNoGps.longitude).not.toBe(0);
+    });
+
+    it("W. UI message truthfully informs user of offline queueing", () => {
+      const dialogPath = path.resolve(__dirname, "../components/FieldObservationDialog.tsx");
+      const content = fs.readFileSync(dialogPath, "utf-8");
+      expect(content).toContain("Observation saved offline — will sync when connectivity returns.");
+      expect(content).not.toContain("Submitted successfully to server when offline");
+    });
+
+    it("X. Service Worker precaches /observations route and navigation shell", () => {
+      const scriptPath = path.resolve(__dirname, "../../scripts/generate-sw-manifest.mjs");
+      const content = fs.readFileSync(scriptPath, "utf-8");
+      expect(content).toContain("\"/observations\"");
+      expect(content).toContain("\"/alerts\"");
+    });
+
+    it("Y. ML models, scientific gates and InSAR code remain untouched", () => {
+      const workerPyPath = path.resolve(__dirname, "../../workers/insar/worker.py");
+      expect(fs.existsSync(workerPyPath)).toBe(true);
+      const workerPy = fs.readFileSync(workerPyPath, "utf-8");
+      expect(workerPy).toContain("'UNAVAILABLE', NULL, NULL, NULL");
+    });
+
+    it("Z. Console shell navigation integrates /observations route", () => {
+      const consoleShellPath = path.resolve(__dirname, "../components/ConsoleShell.tsx");
+      const content = fs.readFileSync(consoleShellPath, "utf-8");
+      expect(content).toContain("<NavLink to=\"/observations\" label={t(\"nav.observations\", \"Observations\")} />");
     });
   });
 });

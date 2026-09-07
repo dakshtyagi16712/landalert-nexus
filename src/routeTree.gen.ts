@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AlertsRouteImport } from './routes/alerts'
+import { Route as ObservationsRouteImport } from './routes/observations'
 import { Route as ZonesIdRouteImport } from './routes/zones.$id'
 
 const IndexRoute = IndexRouteImport.update({
@@ -23,6 +24,11 @@ const AlertsRoute = AlertsRouteImport.update({
   path: '/alerts',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ObservationsRoute = ObservationsRouteImport.update({
+  id: '/observations',
+  path: '/observations',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ZonesIdRoute = ZonesIdRouteImport.update({
   id: '/zones/$id',
   path: '/zones/$id',
@@ -32,30 +38,34 @@ const ZonesIdRoute = ZonesIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/alerts': typeof AlertsRoute
+  '/observations': typeof ObservationsRoute
   '/zones/$id': typeof ZonesIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/alerts': typeof AlertsRoute
+  '/observations': typeof ObservationsRoute
   '/zones/$id': typeof ZonesIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/alerts': typeof AlertsRoute
+  '/observations': typeof ObservationsRoute
   '/zones/$id': typeof ZonesIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/alerts' | '/zones/$id'
+  fullPaths: '/' | '/alerts' | '/observations' | '/zones/$id'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/alerts' | '/zones/$id'
-  id: '__root__' | '/' | '/alerts' | '/zones/$id'
+  to: '/' | '/alerts' | '/observations' | '/zones/$id'
+  id: '__root__' | '/' | '/alerts' | '/observations' | '/zones/$id'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AlertsRoute: typeof AlertsRoute
+  ObservationsRoute: typeof ObservationsRoute
   ZonesIdRoute: typeof ZonesIdRoute
 }
 
@@ -75,6 +85,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AlertsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/observations': {
+      id: '/observations'
+      path: '/observations'
+      fullPath: '/observations'
+      preLoaderRoute: typeof ObservationsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/zones/$id': {
       id: '/zones/$id'
       path: '/zones/$id'
@@ -88,6 +105,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AlertsRoute: AlertsRoute,
+  ObservationsRoute: ObservationsRoute,
   ZonesIdRoute: ZonesIdRoute,
 }
 export const routeTree = rootRouteImport

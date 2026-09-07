@@ -292,18 +292,7 @@ export function ConsoleNav() {
             >
               {t("nav.risk_map", "Risk Map")}
             </a>
-            <a
-              href="/#recent-observations"
-              onClick={(e) => handleNavToSection(e, "recent-observations", "landalert-open-observations")}
-              className={`whitespace-nowrap px-3 py-2.5 text-xs font-medium transition-colors cursor-pointer ${
-                currentPath === "/" &&
-                (routerState.location.hash === "recent-observations" || routerState.location.hash === "observations")
-                  ? "text-primary font-semibold"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {t("nav.observations", "Observations")}
-            </a>
+            <NavLink to="/observations" label={t("nav.observations", "Observations")} />
             <NavLink to="/alerts" label={t("nav.alerts", "Alerts")} />
             <a
               href="/#road-connectivity"
@@ -402,7 +391,7 @@ export function ConsoleNav() {
   );
 }
 
-function NavLink({ to, label, exact = false }: { to: "/" | "/alerts"; label: string; exact?: boolean }) {
+function NavLink({ to, label, exact = false }: { to: "/" | "/alerts" | "/observations"; label: string; exact?: boolean }) {
   return (
     <Link
       to={to}

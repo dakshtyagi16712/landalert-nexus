@@ -16,6 +16,7 @@ import { submitFieldObservationsServerFn, getOfflinePackageServerFn } from "./mo
 
 const OFFLINE_QUEUE_KEY = "landalert_field_observations_queue_v1";
 const OFFLINE_PACKAGE_KEY = "landalert_offline_bundle_v1";
+export const OFFLINE_SYNCED_KEY = "landalert_synced_observations_v1";
 
 export interface CachedBundleStatus {
   package: OfflinePackage | null;
@@ -174,6 +175,7 @@ export function queueObservation(
     ...observation,
     idempotency_key: idKey,
     client_timestamp: observation.client_timestamp || new Date().toISOString(),
+    queue_status: observation.queue_status || "PENDING_SYNC",
   };
 
   const updatedQueue = [...currentQueue, fullRecord];
@@ -193,7 +195,24 @@ export function queueObservation(
 }
 
 /**
- * Removes successfully synchronized records from the queue using acknowledged keys.
+ * Retrieves the local synchronized observation history from storage.
+ */
+export function getSyncedObservations(): FieldObservationInput[] {
+  const storage = getStorage();
+  if (!storage) return [];
+  try {
+    const raw = storage.getItem(OFFLINE_SYNCED_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Removes successfully synchronized records from the queue using acknowledged keys
+ * and marks them as SYNCED in local history with synced_at timestamp.
  */
 export function pruneQueue(acknowledgedKeys: string[]): void {
   if (!acknowledgedKeys.length) return;
@@ -205,8 +224,22 @@ export function pruneQueue(acknowledgedKeys: string[]): void {
   const remaining = current.filter(
     (item) => !item.idempotency_key || !ackSet.has(item.idempotency_key),
   );
+  const now = new Date().toISOString();
+  const syncedRecords: FieldObservationInput[] = current
+    .filter((item) => item.idempotency_key && ackSet.has(item.idempotency_key))
+    .map((item) => ({
+      ...item,
+      queue_status: "SYNCED" as const,
+      synced_at: now,
+    }));
+
   try {
     storage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(remaining));
+    if (syncedRecords.length > 0) {
+      const priorSynced = getSyncedObservations();
+      const combined = [...syncedRecords, ...priorSynced].slice(0, 50);
+      storage.setItem(OFFLINE_SYNCED_KEY, JSON.stringify(combined));
+    }
     if (typeof window !== "undefined") {
       window.dispatchEvent(new CustomEvent("landalert-queue-updated"));
     }
@@ -223,6 +256,7 @@ export function clearOfflineQueue(): void {
   if (!storage) return;
   try {
     storage.removeItem(OFFLINE_QUEUE_KEY);
+    storage.removeItem(OFFLINE_SYNCED_KEY);
     if (typeof window !== "undefined") {
       window.dispatchEvent(new CustomEvent("landalert-queue-updated"));
     }

@@ -40,10 +40,14 @@ export interface FieldObservationInput {
   geo_captured_at?: string | undefined;
   consent_given?: boolean | undefined;
   submitter_role?: string | undefined;
-  // Note: initial status is set server-side based on submitter_role.
+  latitude?: number | undefined;
+  longitude?: number | undefined;
+  reporter_name?: string | undefined;
+  reporter_phone?: string | undefined;
+  synced_at?: string | undefined;
   review_status?: ("PENDING_REVIEW" | "APPROVED" | "REJECTED") | undefined;
   retry_count?: number | undefined;
-  queue_status?: ("PENDING" | "SYNCING" | "FAILED" | "SYNCHRONIZED") | undefined;
+  queue_status?: ("PENDING" | "SYNCING" | "FAILED" | "SYNCHRONIZED" | "PENDING_SYNC" | "SYNCED") | undefined;
   last_error?: string | undefined;
 }
 

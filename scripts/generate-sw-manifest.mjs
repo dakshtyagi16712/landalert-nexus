@@ -42,6 +42,8 @@ if (fs.existsSync(outputAssetsDir)) {
 // 2. Gather critical public assets (including root shell)
 const publicStaticAssets = [
   "/",
+  "/observations",
+  "/alerts",
   "/manifest.json",
   "/emblem-of-india.svg",
   "/favicon.svg",

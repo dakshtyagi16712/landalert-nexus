@@ -10,43 +10,45 @@
  * 5. Strict offline data semantics: NO fabricated weather, ML, or alerts
  */
 
-const CACHE_NAME = "landalert-pwa-vff47a053ec";
+const CACHE_NAME = "landalert-pwa-vb1e2e51278";
 const MAP_CACHE = "landalert-tiles-v1";
 const DATA_CACHE = "landalert-data-v1";
 
 const PRECACHE_ASSETS = [
   "/",
+  "/alerts",
   "/apple-touch-icon.png",
-  "/assets/ConsoleShell-CaAqoXLL.js",
-  "/assets/FieldObservationDialog-DMENaH8E.js",
-  "/assets/MapCanvas-Doj_hSAi.js",
-  "/assets/RiskBits-IUhF2lWx.js",
+  "/assets/ConsoleShell-C2jv8jhy.js",
+  "/assets/FieldObservationDialog-CcQnJTUr.js",
+  "/assets/MapCanvas-W1sIjdfx.js",
+  "/assets/RiskBits-DsT2caLu.js",
   "/assets/RiskMap-CalB6Loj.js",
   "/assets/RiskMap-vh-t_kPv.css",
-  "/assets/alerts-CTXvdXql.js",
-  "/assets/alerts-DbuC_brs.js",
+  "/assets/alerts-CoDHSsiy.js",
+  "/assets/alerts-DzFSxC9O.js",
   "/assets/atkinson-hyperlegible-latin-400-normal-BbWidj28.woff",
   "/assets/atkinson-hyperlegible-latin-400-normal-BrHNak5F.woff2",
   "/assets/atkinson-hyperlegible-latin-ext-400-normal-Bbz-b3yf.woff",
   "/assets/atkinson-hyperlegible-latin-ext-400-normal-DRk46D-x.woff2",
-  "/assets/auth-domains-Bu9V8dKJ.js",
+  "/assets/auth-domains-DS34dsqC.js",
   "/assets/client-D2HHhMwr.js",
   "/assets/dist-Dhrj-3P3.js",
   "/assets/geo-translations-Df2VNEtI.js",
-  "/assets/index-CZO8rSWk.js",
+  "/assets/index-c5Lc6c5O.js",
   "/assets/lock-DRCxS8gL.js",
+  "/assets/observations-DzFSxC9O.js",
   "/assets/offline-media-store-BuzdrYhz.js",
   "/assets/queryOptions-BIFxg3nk.js",
   "/assets/risk-CkQ7Hukn.js",
   "/assets/rolldown-runtime-hePW80VL.js",
   "/assets/route-CDY9Qrxi.js",
-  "/assets/routes-CTXvdXql.js",
-  "/assets/routes-DCh14rWc.js",
-  "/assets/styles-B0Fnc7_s.css",
-  "/assets/useNavigate-De9dkEKf.js",
+  "/assets/routes-DbyB746s.js",
+  "/assets/routes-DzFSxC9O.js",
+  "/assets/styles-CFW8y9N6.css",
+  "/assets/useNavigate-BiJuHLMZ.js",
   "/assets/web-dZP68vr3.js",
-  "/assets/zones._id-CTXvdXql.js",
-  "/assets/zones._id-PwxNpDKZ.js",
+  "/assets/zones._id-DUH3DFir.js",
+  "/assets/zones._id-DzFSxC9O.js",
   "/emblem-of-india.svg",
   "/favicon.ico",
   "/favicon.svg",
@@ -55,6 +57,7 @@ const PRECACHE_ASSETS = [
   "/icon-192.png",
   "/icon-512.png",
   "/manifest.json",
+  "/observations",
   "/offline-shell.html",
   "/robots.txt"
 ];

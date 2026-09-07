@@ -562,9 +562,7 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
       if (isEffectiveOffline) {
         setStatusMessage({
           type: "offline",
-          text: t("field_observation.offline_queued", "Device offline. Observation preserved in local queue ({{id}}); will sync automatically upon reconnection.", {
-            id: fullRecord.idempotency_key?.slice(0, 12),
-          }),
+          text: t("field_observation.offline_queued", "Observation saved offline — will sync when connectivity returns."),
         });
         setTimeout(() => {
           setOpen(false);
