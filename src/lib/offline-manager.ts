@@ -526,6 +526,7 @@ export type OfflineSyncStatus =
 export function useOfflineQueue() {
   const { isOnline, apiReachable, checkHealth } = useConnectivityStatus();
   const [queueCount, setQueueCount] = useState<number>(0);
+  const [syncedCount, setSyncedCount] = useState<number>(0);
   const [syncing, setSyncing] = useState<boolean>(false);
   const [lastSyncResult, setLastSyncResult] = useState<SyncResult | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
@@ -535,6 +536,7 @@ export function useOfflineQueue() {
 
   const refreshQueueCount = useCallback(() => {
     setQueueCount(getQueuedObservations().length);
+    setSyncedCount(getSyncedObservations().length);
   }, []);
 
   useEffect(() => {
@@ -610,6 +612,7 @@ export function useOfflineQueue() {
     apiReachable,
     checkHealth,
     queueCount,
+    syncedCount,
     syncing,
     syncStatus,
     syncError,

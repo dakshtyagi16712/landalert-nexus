@@ -588,5 +588,14 @@ describe("LandAlert-Nexus Offline App Shell & Service Worker Specification", () 
       const content = fs.readFileSync(consoleShellPath, "utf-8");
       expect(content).toContain("<NavLink to=\"/observations\" label={t(\"nav.observations\", \"Observations\")} />");
     });
+
+    it("AA. SyncQueueDialog renders synced observations even when pending queue is empty", () => {
+      const dialogPath = path.resolve(__dirname, "../components/SyncQueueDialog.tsx");
+      expect(fs.existsSync(dialogPath)).toBe(true);
+      const content = fs.readFileSync(dialogPath, "utf-8");
+      expect(content).toContain("getSyncedObservations");
+      expect(content).toContain("syncedItems");
+      expect(content).toContain("tab_synced");
+    });
   });
 });

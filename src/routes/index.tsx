@@ -64,7 +64,7 @@ import type { User } from "@supabase/supabase-js";
 import { useUserLocation } from "@/hooks/useUserLocation";
 import { getUserAuthorizationState, type AppUserRole } from "@/lib/auth-domains";
 import { getObservationStatusMeta } from "@/lib/observation-status";
-import { getOfflineOverviewFallback, getQueuedObservations } from "@/lib/offline-manager";
+import { getOfflineOverviewFallback, getQueuedObservations, getSyncedObservations } from "@/lib/offline-manager";
 
 const overviewQuery = queryOptions({
   queryKey: ["overview"],
@@ -455,9 +455,13 @@ function Dashboard() {
     };
   }, []);
 
-  // Observations list (combining offline pending queue and database observations)
+  // Observations list (combining offline pending queue, local synced archive, and server observations)
   const observationsList = useMemo(() => {
     const serverObs = (data as any).observations || [];
+    const serverKeySet = new Set(
+      serverObs.map((s: any) => s.idempotency_key || String(s.id)),
+    );
+
     const queuedObs = getQueuedObservations().map((q) => ({
       id: q.idempotency_key,
       zone_id: q.zone_id,
@@ -470,7 +474,24 @@ function Dashboard() {
       review_status: "PENDING_SYNC",
       is_offline_queued: true,
     }));
-    return [...queuedObs, ...serverObs].slice(0, 8);
+
+    const syncedObs = getSyncedObservations()
+      .filter((s) => !serverKeySet.has(s.idempotency_key!))
+      .map((s) => ({
+        id: s.idempotency_key,
+        zone_id: s.zone_id,
+        observed_at: s.observed_at || s.client_timestamp || new Date().toISOString(),
+        rainfall_mm: s.rainfall_mm,
+        soil_condition: s.soil_condition,
+        visual_signs: s.visual_signs,
+        road_status: s.road_status,
+        status: "SYNCED",
+        review_status: s.review_status || "OFFICIAL_VERIFIED",
+        is_offline_queued: false,
+        is_synced: true,
+      }));
+
+    return [...queuedObs, ...syncedObs, ...serverObs].slice(0, 8);
   }, [data, queueUpdateSignal]);
 
   async function runRecompute() {
