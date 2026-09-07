@@ -39,8 +39,9 @@ if (fs.existsSync(outputAssetsDir)) {
   console.warn("[SW-Manifest] Warning: .output/public/assets does not exist yet. Run vite build first.");
 }
 
-// 2. Gather critical public assets
+// 2. Gather critical public assets (including root shell)
 const publicStaticAssets = [
+  "/",
   "/manifest.json",
   "/emblem-of-india.svg",
   "/favicon.svg",

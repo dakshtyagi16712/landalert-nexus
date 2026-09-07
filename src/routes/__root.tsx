@@ -160,9 +160,31 @@ function RootComponent() {
         const registerSw = () => {
           navigator.serviceWorker
             .register("/sw.js", { scope: "/" })
-            .then((reg) => {
+            .then(async (reg) => {
               reg.update();
               console.log("[PWA] ServiceWorker registered with scope:", reg.scope);
+              // Ensure root shell HTML is cached immediately while online
+              if ("caches" in window) {
+                try {
+                  const keys = await caches.keys();
+                  const pwaKey = keys.find((k) => k.startsWith("landalert-pwa-"));
+                  if (pwaKey) {
+                    const cache = await caches.open(pwaKey);
+                    const hasRoot = await cache.match("/");
+                    if (!hasRoot) {
+                      const res = await fetch("/", { credentials: "same-origin" });
+                      if (res && res.ok) {
+                        await cache.put("/", res.clone());
+                        await cache.put(window.location.origin + "/", res.clone());
+                        await cache.put(window.location.href, res);
+                        console.log("[PWA] Successfully cached root application shell from client.");
+                      }
+                    }
+                  }
+                } catch (e) {
+                  console.warn("[PWA] Client-side app shell cache warning:", e);
+                }
+              }
             })
             .catch((err) => {
               console.warn("[PWA] ServiceWorker registration failed:", err);

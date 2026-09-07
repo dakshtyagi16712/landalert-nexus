@@ -10,11 +10,12 @@
  * 5. Strict offline data semantics: NO fabricated weather, ML, or alerts
  */
 
-const CACHE_NAME = "landalert-pwa-v3fb88e3c53";
+const CACHE_NAME = "landalert-pwa-v4ec9922be9";
 const MAP_CACHE = "landalert-tiles-v1";
 const DATA_CACHE = "landalert-data-v1";
 
 const PRECACHE_ASSETS = [
+  "/",
   "/apple-touch-icon.png",
   "/assets/ConsoleShell-CloztkJ4.js",
   "/assets/FieldObservationDialog-CP89RH18.js",
@@ -22,7 +23,7 @@ const PRECACHE_ASSETS = [
   "/assets/RiskBits-CiEotVbN.js",
   "/assets/RiskMap-CalB6Loj.js",
   "/assets/RiskMap-vh-t_kPv.css",
-  "/assets/alerts-Dx8BfySq.js",
+  "/assets/alerts-Bl3SA7qq.js",
   "/assets/alerts-pH9ozTMA.js",
   "/assets/atkinson-hyperlegible-latin-400-normal-BbWidj28.woff",
   "/assets/atkinson-hyperlegible-latin-400-normal-BrHNak5F.woff2",
@@ -31,7 +32,7 @@ const PRECACHE_ASSETS = [
   "/assets/client-D2HHhMwr.js",
   "/assets/dist-Dhrj-3P3.js",
   "/assets/geo-translations-Df2VNEtI.js",
-  "/assets/index-pAd1L1uM.js",
+  "/assets/index-m971bU7U.js",
   "/assets/lock-DRCxS8gL.js",
   "/assets/monitoring.functions-BjZjPd3h.js",
   "/assets/offline-media-store-BuzdrYhz.js",
@@ -39,12 +40,12 @@ const PRECACHE_ASSETS = [
   "/assets/risk-CkQ7Hukn.js",
   "/assets/rolldown-runtime-hePW80VL.js",
   "/assets/route-CDY9Qrxi.js",
-  "/assets/routes-goPi1L84.js",
+  "/assets/routes-Bm43wtxE.js",
   "/assets/routes-pH9ozTMA.js",
   "/assets/styles-B0Fnc7_s.css",
   "/assets/useNavigate-h92FaX53.js",
   "/assets/web-dZP68vr3.js",
-  "/assets/zones._id-ZiRTVXU9.js",
+  "/assets/zones._id-CFVkEEDQ.js",
   "/assets/zones._id-pH9ozTMA.js",
   "/emblem-of-india.svg",
   "/favicon.ico",
@@ -74,11 +75,12 @@ self.addEventListener("install", (event) => {
         ),
       );
 
-      // Precache root navigation HTML shell
+      // Precache root navigation HTML shell under both relative and absolute keys
       try {
-        const rootRes = await fetch("/", { cache: "reload" });
+        const rootRes = await fetch("/", { cache: "reload", credentials: "same-origin" });
         if (rootRes && rootRes.ok) {
-          await cache.put("/", rootRes);
+          await cache.put("/", rootRes.clone());
+          await cache.put(self.location.origin + "/", rootRes.clone());
           console.log("[SW] Root application shell (/) successfully cached on install.");
         }
       } catch (err) {
@@ -204,9 +206,10 @@ self.addEventListener("fetch", (event) => {
             const copy = networkResponse.clone();
             caches.open(CACHE_NAME).then((cache) => {
               cache.put(request, copy);
-              // Ensure root shell remains fresh
-              if (url.pathname === "/") {
+              // Ensure root shell remains fresh under all URL variations
+              if (url.pathname === "/" || url.pathname === "") {
                 cache.put("/", networkResponse.clone());
+                cache.put(self.location.origin + "/", networkResponse.clone());
               }
             });
           }
@@ -218,17 +221,31 @@ self.addEventListener("fetch", (event) => {
           const cachedRoute = await cache.match(request);
           if (cachedRoute) return cachedRoute;
 
-          // 2. Try root application shell (TanStack router hydrates on client)
-          const rootShell = await cache.match("/");
+          // 2. Try URL pathname
+          const cachedPath = await cache.match(url.pathname);
+          if (cachedPath) return cachedPath;
+
+          // 3. Try root application shell (relative, absolute, or any cache)
+          const rootShell =
+            (await cache.match("/")) ||
+            (await cache.match(self.location.origin + "/")) ||
+            (await caches.match("/"));
           if (rootShell) return rootShell;
 
-          // 3. Try dedicated standalone offline shell fallback
-          const offlineShell = await cache.match("/offline-shell.html");
+          // 4. Try dedicated standalone offline shell fallback
+          const offlineShell =
+            (await cache.match("/offline-shell.html")) ||
+            (await cache.match(self.location.origin + "/offline-shell.html")) ||
+            (await caches.match("/offline-shell.html"));
           if (offlineShell) return offlineShell;
 
-          // 4. Clean error fallback
+          // 5. Check any available cache for this request
+          const anyPage = await caches.match(request);
+          if (anyPage) return anyPage;
+
+          // 6. Last resort: Return complete standalone HTML document
           return new Response(
-            `<!DOCTYPE html><html><head><title>LandAlert-Nexus Offline</title></head><body><h1>LandAlert-Nexus Offline</h1><p>Application shell not yet cached. Please visit while connected to download the field console.</p></body></html>`,
+            `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LandAlert-Nexus — Offline Mode</title><style>body{margin:0;background:#090d16;color:#e2e8f0;font-family:system-ui,sans-serif;padding:2rem;text-align:center}.box{max-width:520px;margin:3rem auto;background:#131a2b;padding:2rem;border-radius:8px;border:1px solid #1e293b}h1{font-size:1.4rem;color:#f8fafc}p{color:#94a3b8;font-size:0.9rem}button{background:#2563eb;color:#fff;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;font-weight:600;margin-top:1rem}</style></head><body><div class="box"><h1>LandAlert-Nexus — Offline Mode</h1><p>The application is operating in offline mode. Please reload once internet is restored, or use saved field capabilities.</p><button onclick="location.reload()">Retry Connection</button></div></body></html>`,
             {
               status: 200,
               headers: { "Content-Type": "text/html; charset=utf-8" },
