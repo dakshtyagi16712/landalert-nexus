@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { Mic, Languages, RotateCcw, Loader2, WifiOff } from "lucide-react";
+import { Mic, Languages, RotateCcw, Loader2 } from "lucide-react";
 import { translateToEnglish } from "@/lib/translation.service";
 import { useTranslation } from "react-i18next";
 import { saveOfflineMedia } from "@/lib/offline-media-store";
@@ -23,28 +23,108 @@ interface LanguageOption {
   code: string;
   label: string;
   speechCode: string;
+  whisperLang: string;
 }
 
 const QUICK_LANGUAGES: LanguageOption[] = [
-  { code: "hi", label: "🇮🇳 हिन्दी", speechCode: "hi-IN" },
-  { code: "en", label: "🇬🇧 English", speechCode: "en-IN" },
-  { code: "bn", label: "বাংলা", speechCode: "bn-IN" },
-  { code: "ne", label: "नेपाली", speechCode: "ne-NP" },
-  { code: "as", label: "অসমীয়া", speechCode: "as-IN" },
+  { code: "hi", label: "🇮🇳 हिन्दी", speechCode: "hi-IN", whisperLang: "hindi" },
+  { code: "en", label: "🇬🇧 English", speechCode: "en-IN", whisperLang: "english" },
+  { code: "bn", label: "বাংলা", speechCode: "bn-IN", whisperLang: "bengali" },
+  { code: "ne", label: "नेपाली", speechCode: "ne-NP", whisperLang: "nepali" },
+  { code: "as", label: "অসমীয়া", speechCode: "as-IN", whisperLang: "assamese" },
 ];
 
 const EXTRA_LANGUAGES: LanguageOption[] = [
-  { code: "mr", label: "मराठी (Marathi)", speechCode: "mr-IN" },
-  { code: "gu", label: "ગુજરાતી (Gujarati)", speechCode: "gu-IN" },
-  { code: "pa", label: "ਪੰਜਾਬੀ (Punjabi)", speechCode: "pa-IN" },
-  { code: "ta", label: "தமிழ் (Tamil)", speechCode: "ta-IN" },
-  { code: "te", label: "తెలుగు (Telugu)", speechCode: "te-IN" },
-  { code: "kn", label: "ಕನ್ನಡ (Kannada)", speechCode: "kn-IN" },
-  { code: "ml", label: "മലയാളം (Malayalam)", speechCode: "ml-IN" },
-  { code: "ur", label: "اردو (Urdu)", speechCode: "ur-IN" },
+  { code: "mr", label: "मराठी (Marathi)", speechCode: "mr-IN", whisperLang: "marathi" },
+  { code: "gu", label: "ગુજરાતી (Gujarati)", speechCode: "gu-IN", whisperLang: "gujarati" },
+  { code: "pa", label: "ਪੰਜਾਬੀ (Punjabi)", speechCode: "pa-IN", whisperLang: "punjabi" },
+  { code: "ta", label: "தமிழ் (Tamil)", speechCode: "ta-IN", whisperLang: "tamil" },
+  { code: "te", label: "తెలుగు (Telugu)", speechCode: "te-IN", whisperLang: "telugu" },
+  { code: "kn", label: "ಕನ್ನಡ (Kannada)", speechCode: "kn-IN", whisperLang: "kannada" },
+  { code: "ml", label: "മലയാളം (Malayalam)", speechCode: "ml-IN", whisperLang: "malayalam" },
+  { code: "ur", label: "اردو (Urdu)", speechCode: "ur-IN", whisperLang: "urdu" },
 ];
 
 const ALL_LANGUAGES = [...QUICK_LANGUAGES, ...EXTRA_LANGUAGES];
+
+// ─── Singleton in-browser Whisper pipeline (loaded on-demand) ───────────────
+let _whisperPipeline: any = null;
+let _whisperLoadPromise: Promise<any> | null = null;
+
+async function getWhisperPipeline(onProgress?: (msg: string) => void): Promise<any> {
+  if (_whisperPipeline) return _whisperPipeline;
+  if (_whisperLoadPromise) return _whisperLoadPromise;
+
+  _whisperLoadPromise = (async () => {
+    try {
+      onProgress?.("⏳ Initializing AI speech model…");
+      const { pipeline, env } = await import("@xenova/transformers");
+      env.backends.onnx.wasm.proxy = false;
+      env.backends.onnx.wasm.numThreads = 1;
+      env.useBrowserCache = true;
+      env.allowLocalModels = false;
+
+      const pipe = await pipeline(
+        "automatic-speech-recognition",
+        "Xenova/whisper-tiny",
+        {
+          progress_callback: (p: any) => {
+            if (p?.loaded != null && p?.total) {
+              const pct = Math.round((p.loaded / p.total) * 100);
+              onProgress?.(`⏳ Loading model… ${pct}%`);
+            }
+          },
+        }
+      );
+      _whisperPipeline = pipe;
+      onProgress?.("✓ Model ready");
+      return pipe;
+    } catch (e) {
+      _whisperLoadPromise = null;
+      throw e;
+    }
+  })();
+
+  return _whisperLoadPromise;
+}
+
+// ─── Convert recorded audio Blob → 16 kHz Float32Array ──────────────────────
+async function blobToFloat32(blob: Blob): Promise<Float32Array | null> {
+  try {
+    const buf = await blob.arrayBuffer();
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioCtx) return null;
+    const ctx = new AudioCtx();
+    let decoded: AudioBuffer;
+    try {
+      decoded = await new Promise<AudioBuffer>((resolve, reject) => {
+        const p = ctx.decodeAudioData(buf.slice(0), resolve, reject);
+        if (p && typeof p.then === "function") {
+          p.then(resolve).catch(reject);
+        }
+      });
+    } finally {
+      ctx.close().catch(() => {});
+    }
+
+    const targetRate = 16000;
+    const len = Math.ceil(decoded.duration * targetRate);
+    if (len < 1600) return null;
+
+    const OfflineCtx = window.OfflineAudioContext || (window as any).webkitOfflineAudioContext;
+    if (!OfflineCtx) return null;
+    const offline = new OfflineCtx(1, len, targetRate);
+    const src = offline.createBufferSource();
+    src.buffer = decoded;
+    src.connect(offline.destination);
+    src.start(0);
+    const rendered = await offline.startRendering();
+    return rendered.getChannelData(0);
+  } catch (err) {
+    console.warn("[VoiceTranslate] Audio decode error:", err);
+    return null;
+  }
+}
 
 export function VoiceTranslateTextarea({
   id = "fieldNotesInput",
@@ -58,17 +138,13 @@ export function VoiceTranslateTextarea({
 }: VoiceTranslateTextareaProps) {
   const { t, i18n } = useTranslation();
   const [isListening, setIsListening] = useState(false);
-  const [isOfflineRecording, setIsOfflineRecording] = useState(false);
   const [audioRecordDuration, setAudioRecordDuration] = useState(0);
-  const [interimSpeech, setInterimSpeech] = useState("");
   const [isTranslating, setIsTranslating] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [originalDraft, setOriginalDraft] = useState<string | null>(null);
-  const [isOnline, setIsOnline] = useState<boolean>(() =>
-    typeof navigator !== "undefined" ? navigator.onLine : true
-  );
+  const [micSupported, setMicSupported] = useState(true);
 
-  // Default to Hindi (hi-IN) for India field operations, or active app locale if Indic
+  // Default to Hindi (हिन्दी) for Indian landslide zones, or active app locale if Indic
   const [selectedLang, setSelectedLang] = useState<string>(() => {
     const current = (i18n?.language || "").toLowerCase();
     if (current.startsWith("bn")) return "bn";
@@ -78,7 +154,6 @@ export function VoiceTranslateTextarea({
     return "hi";
   });
 
-  const recognitionRef = useRef<any>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioStreamRef = useRef<MediaStream | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -87,20 +162,18 @@ export function VoiceTranslateTextarea({
   const isListeningRef = useRef(false);
   const valueRef = useRef(value);
 
+  // Parallel live recognition tracking
+  const recognitionRef = useRef<any>(null);
+  const hasLiveTranscribedRef = useRef(false);
+
   useEffect(() => {
     valueRef.current = value;
   }, [value]);
 
-  // Online / Offline monitor
   useEffect(() => {
-    const handleOnline = () => setIsOnline(true);
-    const handleOffline = () => setIsOnline(false);
-    window.addEventListener("online", handleOnline);
-    window.addEventListener("offline", handleOffline);
-    return () => {
-      window.removeEventListener("online", handleOnline);
-      window.removeEventListener("offline", handleOffline);
-    };
+    if (typeof navigator === "undefined" || !navigator?.mediaDevices?.getUserMedia) {
+      setMicSupported(false);
+    }
   }, []);
 
   const showNotice = useCallback((msg: string, ms = 5000) => {
@@ -111,11 +184,11 @@ export function VoiceTranslateTextarea({
   const activeLangConfig: LanguageOption =
     ALL_LANGUAGES.find((l) => l.code === selectedLang) || QUICK_LANGUAGES[0]!;
 
-  // ─── Google Translate Engine (translates recognized text to English) ────────
-  const handleTranslateAndAppend = useCallback(
-    async (spokenText: string) => {
-      const trimmed = spokenText.trim();
-      if (!trimmed) return;
+  // ── Translate native speech → English via Google Translate NMT ─────────────
+  const translateAndAppend = useCallback(
+    async (rawText: string, durationSecs?: number) => {
+      const trimmed = rawText.trim();
+      if (!trimmed) return false;
 
       setIsTranslating(true);
       try {
@@ -131,111 +204,128 @@ export function VoiceTranslateTextarea({
               ? `✓ Translated from ${activeLangConfig.label} → English`
               : "✓ Transcribed in English"
           );
+          return true;
         }
       } catch (err) {
         console.warn("[VoiceTranslate] Translation error:", err);
       } finally {
         setIsTranslating(false);
       }
+      return false;
     },
     [activeLangConfig, onChange, showNotice]
   );
 
-  // ─── Online Live Speech Recognition (Google Translate mode) ─────────────────
-  const startOnlineSpeechRecognition = useCallback(() => {
+  // ── Speech-to-Text via Whisper (in-browser) + Google Translate NMT ──────────
+  const transcribeBlob = useCallback(
+    async (blob: Blob, durationSecs: number) => {
+      setIsTranslating(true);
+      showNotice(`🔄 Converting ${activeLangConfig.label} speech to English text…`, 0);
+
+      try {
+        const float32 = await blobToFloat32(blob);
+        if (!float32) throw new Error("audio-decode-failed");
+
+        const pipe = await getWhisperPipeline((msg) => setNotice(msg));
+
+        // 1. Transcribe in native language (Whisper is accurate at native transcription)
+        const result = await pipe(float32, {
+          task: "transcribe",
+          language: activeLangConfig.whisperLang,
+          chunk_length_s: 30,
+          stride_length_s: 5,
+          return_timestamps: false,
+        });
+
+        const rawText: string = (
+          Array.isArray(result)
+            ? result.map((r: any) => r.text).join(" ")
+            : result?.text || ""
+        ).trim();
+
+        if (rawText && rawText.length > 1) {
+          showNotice("🔄 Translating to English via Google Translate…", 0);
+          // 2. Translate native transcription to English using Google Translate NMT
+          const ok = await translateAndAppend(rawText, durationSecs);
+          if (ok) return;
+        }
+        throw new Error("empty-transcription");
+      } catch (err) {
+        console.warn("[VoiceTranslate] Whisper transcription failed:", err);
+        // Fallback: save voice note tag
+        const current = (valueRef.current || "").trim();
+        const tag = `[🎙️ Voice note (${durationSecs}s)]`;
+        const updated = current ? `${current} ${tag}` : tag;
+        valueRef.current = updated;
+        onChange(updated);
+        showNotice(`⚠️ Saved voice note (${durationSecs}s)`);
+      } finally {
+        setIsTranslating(false);
+      }
+    },
+    [activeLangConfig, translateAndAppend, onChange, showNotice]
+  );
+
+  // ── Optional parallel Web Speech API ───────────────────────────────────────
+  const attachLiveRecognition = useCallback(() => {
+    if (typeof window === "undefined") return;
     const SpeechRec =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-
-    if (!SpeechRec) {
-      // Browser doesn't have Web Speech API — switch to offline audio recording
-      startOfflineAudioRecording();
-      return;
-    }
+    if (!SpeechRec || !navigator.onLine) return;
 
     try {
       const recognition = new SpeechRec();
       recognition.continuous = true;
-      recognition.interimResults = true;
-      recognition.lang = activeLangConfig.speechCode; // e.g. hi-IN, en-IN
+      recognition.interimResults = false;
+      recognition.lang = activeLangConfig.speechCode;
       recognition.maxAlternatives = 1;
 
-      recognition.onresult = (event: any) => {
+      recognition.onresult = async (event: any) => {
         if (!isListeningRef.current) return;
-        let interimStr = "";
         for (let i = event.resultIndex; i < event.results.length; ++i) {
           const res = event.results[i];
           const transcript = res[0]?.transcript || "";
-          if (res.isFinal) {
-            if (transcript.trim()) {
-              setInterimSpeech("");
-              handleTranslateAndAppend(transcript.trim());
-            }
-          } else {
-            interimStr += transcript;
+          if (res.isFinal && transcript.trim()) {
+            hasLiveTranscribedRef.current = true;
+            await translateAndAppend(transcript.trim());
           }
-        }
-        if (interimStr) {
-          setInterimSpeech(interimStr);
         }
       };
 
-      recognition.onerror = (event: any) => {
-        console.info("[VoiceTranslate] Speech event:", event.error);
-        if (event.error === "no-speech") return; // Normal pause, ignore
-        if (event.error === "not-allowed" || event.error === "permission-denied") {
-          showNotice("⚠️ Microphone access denied — allow microphone in browser.");
-          stopListening();
-        } else if (event.error === "network") {
-          // Google speech servers unreachable on this network — fallback to offline recording
-          showNotice("⚠️ Speech recognition offline — recording voice memo.");
-          stopListening();
-          startOfflineAudioRecording();
-        }
-      };
-
-      recognition.onend = () => {
-        // Auto-restart if user has not manually clicked Stop
-        if (isListeningRef.current && isOnline) {
-          try {
-            recognition.start();
-          } catch {
-            /* ignore restart collisions */
-          }
-        } else {
-          setIsListening(false);
-          setInterimSpeech("");
-        }
+      recognition.onerror = () => {
+        try { recognition.stop(); } catch {}
+        recognitionRef.current = null;
       };
 
       recognitionRef.current = recognition;
-      isListeningRef.current = true;
-      setIsListening(true);
-      setIsOfflineRecording(false);
       recognition.start();
-      showNotice(`🎙️ Listening in ${activeLangConfig.label}… speak clearly.`);
-    } catch (err) {
-      console.warn("[VoiceTranslate] Recognition start failed:", err);
-      startOfflineAudioRecording();
+    } catch {
+      recognitionRef.current = null;
     }
-  }, [activeLangConfig, handleTranslateAndAppend, isOnline, showNotice]);
+  }, [activeLangConfig.speechCode, translateAndAppend]);
 
-  // ─── Offline Audio Recording (MediaRecorder + IndexedDB) ────────────────────
-  const startOfflineAudioRecording = useCallback(async () => {
-    if (!navigator?.mediaDevices?.getUserMedia) {
-      showNotice("⚠️ Microphone not supported on this browser.");
-      return;
-    }
+  // ── Start recording ────────────────────────────────────────────────────────
+  const startListening = useCallback(async () => {
+    if (isListeningRef.current) return;
 
     let stream: MediaStream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    } catch {
-      showNotice("⚠️ Microphone access denied.");
+    } catch (err: any) {
+      const n = err?.name || "";
+      if (n === "NotAllowedError" || n === "PermissionDeniedError") {
+        showNotice("⚠️ Microphone access blocked — allow mic in browser settings.");
+      } else if (n === "NotFoundError") {
+        showNotice("⚠️ No microphone found on this device.");
+      } else {
+        showNotice("⚠️ Could not access microphone.");
+      }
       return;
     }
 
     audioStreamRef.current = stream;
     audioChunksRef.current = [];
+    hasLiveTranscribedRef.current = false;
 
     const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
       ? "audio/webm;codecs=opus"
@@ -264,7 +354,7 @@ export function VoiceTranslateTextarea({
       const durationSecs = Math.max(1, Math.round((Date.now() - recordStartRef.current) / 1000));
       const blob = new Blob(audioChunksRef.current, { type: mimeType || "audio/webm" });
 
-      // Save to IndexedDB for offline submission
+      // Save audio to IndexedDB for report attachment
       try {
         const mediaId = `voice_memo_${Date.now()}`;
         await saveOfflineMedia(mediaId, blob, {
@@ -273,15 +363,14 @@ export function VoiceTranslateTextarea({
           size: blob.size,
         });
         if (onAudioRecorded) onAudioRecorded(blob, mediaId);
-      } catch {}
+      } catch {
+        // Non-fatal
+      }
 
-      // Append offline note tag
-      const current = (valueRef.current || "").trim();
-      const tag = `[🎙️ Voice note (${durationSecs}s) — Stored offline]`;
-      const updated = current ? `${current} ${tag}` : tag;
-      valueRef.current = updated;
-      onChange(updated);
-      showNotice(`✓ Voice note (${durationSecs}s) saved to report`);
+      // If live transcription already captured text, done; otherwise transcribe with Whisper + Google Translate
+      if (!hasLiveTranscribedRef.current) {
+        await transcribeBlob(blob, durationSecs);
+      }
     };
 
     mediaRecorderRef.current = recorder;
@@ -290,27 +379,24 @@ export function VoiceTranslateTextarea({
     setAudioRecordDuration(0);
     isListeningRef.current = true;
     setIsListening(true);
-    setIsOfflineRecording(true);
+
+    attachLiveRecognition();
 
     recordTimerRef.current = setInterval(() => {
       setAudioRecordDuration(Math.round((Date.now() - recordStartRef.current) / 1000));
     }, 1000);
 
-    showNotice("🎙️ Recording voice note offline…");
-  }, [onAudioRecorded, onChange, showNotice]);
+    showNotice(`🎙️ Listening in ${activeLangConfig.label}… speak clearly.`, 4000);
+  }, [activeLangConfig, attachLiveRecognition, transcribeBlob, onAudioRecorded, showNotice]);
 
   const stopListening = useCallback(() => {
     isListeningRef.current = false;
     if (recognitionRef.current) {
-      try {
-        recognitionRef.current.stop();
-      } catch {}
+      try { recognitionRef.current.stop(); } catch {}
       recognitionRef.current = null;
     }
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
-      try {
-        mediaRecorderRef.current.stop();
-      } catch {}
+      try { mediaRecorderRef.current.stop(); } catch {}
       mediaRecorderRef.current = null;
     }
     if (audioStreamRef.current) {
@@ -319,47 +405,33 @@ export function VoiceTranslateTextarea({
     }
     clearInterval(recordTimerRef.current);
     recordTimerRef.current = null;
-    setInterimSpeech("");
     setIsListening(false);
-    setIsOfflineRecording(false);
   }, []);
 
-  const toggle = useCallback(async (e?: React.MouseEvent) => {
-    e?.preventDefault();
-    e?.stopPropagation();
-    if (disabled || isTranslating) return;
-
-    if (isListeningRef.current) {
-      stopListening();
-    } else {
-      // If online: use Google Translate speech recognition
-      // If offline: use offline voice recording
-      if (isOnline) {
-        startOnlineSpeechRecognition();
-      } else {
-        await startOfflineAudioRecording();
-      }
-    }
-  }, [disabled, isTranslating, isOnline, startOnlineSpeechRecognition, startOfflineAudioRecording, stopListening]);
+  const toggle = useCallback(
+    async (e?: React.MouseEvent) => {
+      e?.preventDefault();
+      e?.stopPropagation();
+      if (disabled || isTranslating) return;
+      isListeningRef.current ? stopListening() : await startListening();
+    },
+    [disabled, isTranslating, startListening, stopListening]
+  );
 
   useEffect(() => () => {
     isListeningRef.current = false;
     if (recognitionRef.current) {
-      try {
-        recognitionRef.current.stop();
-      } catch {}
+      try { recognitionRef.current.stop(); } catch {}
       recognitionRef.current = null;
     }
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
-      try {
-        mediaRecorderRef.current.stop();
-      } catch {}
+      try { mediaRecorderRef.current.stop(); } catch {}
     }
     audioStreamRef.current?.getTracks().forEach((t) => t.stop());
     clearInterval(recordTimerRef.current);
   }, []);
 
-  // ─── Translate typed text button ──────────────────────────────────────────
+  // ── Translate typed text ───────────────────────────────────────────────────
   const handleTranslateTyped = async () => {
     if (!value.trim()) return;
     setIsTranslating(true);
@@ -451,33 +523,31 @@ export function VoiceTranslateTextarea({
         />
 
         <div className="absolute right-2 top-2 flex flex-col gap-1.5 items-end">
-          {/* Microphone button */}
-          <Button
-            type="button"
-            variant={isListening ? "destructive" : "outline"}
-            size="sm"
-            disabled={disabled || isTranslating}
-            onClick={toggle}
-            className={`h-7 w-7 p-0 rounded-full shadow-sm transition-all ${
-              isListening ? "animate-pulse ring-2 ring-red-400" : "bg-card hover:bg-secondary"
-            }`}
-            title={
-              isListening
-                ? "Stop recording"
-                : isOnline
-                ? `Speak in ${activeLangConfig.label} (Google Translate live voice)`
-                : "Record voice note offline"
-            }
-            aria-label="Toggle voice recording"
-          >
-            {isTranslating ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
-            ) : (
-              <Mic className={`h-3.5 w-3.5 ${isListening ? "text-white" : "text-primary"}`} />
-            )}
-          </Button>
+          {micSupported && (
+            <Button
+              type="button"
+              variant={isListening ? "destructive" : "outline"}
+              size="sm"
+              disabled={disabled || isTranslating}
+              onClick={toggle}
+              className={`h-7 w-7 p-0 rounded-full shadow-sm transition-all ${
+                isListening ? "animate-pulse ring-2 ring-red-400" : "bg-card hover:bg-secondary"
+              }`}
+              title={
+                isListening
+                  ? "Stop recording"
+                  : `Speak in ${activeLangConfig.label} (auto-translates to English)`
+              }
+              aria-label="Toggle voice recording"
+            >
+              {isTranslating ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+              ) : (
+                <Mic className={`h-3.5 w-3.5 ${isListening ? "text-white" : "text-primary"}`} />
+              )}
+            </Button>
+          )}
 
-          {/* Translate typed text button */}
           <Button
             type="button"
             variant="outline"
@@ -495,7 +565,6 @@ export function VoiceTranslateTextarea({
             )}
           </Button>
 
-          {/* Revert original button */}
           {originalDraft !== null && (
             <Button
               type="button"
@@ -511,16 +580,6 @@ export function VoiceTranslateTextarea({
         </div>
       </div>
 
-      {/* Live Speech Recognition Bubble (Google Translate style live feedback) */}
-      {isListening && interimSpeech && (
-        <div className="bg-primary/10 border border-primary/20 rounded px-2 py-1 text-xs text-primary flex items-center gap-1.5 animate-pulse">
-          <span className="font-semibold text-[0.68rem] uppercase font-mono">
-            {activeLangConfig.label}:
-          </span>
-          <span className="italic truncate font-sans">"{interimSpeech}"</span>
-        </div>
-      )}
-
       {/* Footer Info Bar */}
       <div className="flex flex-wrap items-center justify-between gap-1 text-[0.65rem] font-mono">
         <div className="flex items-center gap-1.5 flex-1 min-w-0">
@@ -531,19 +590,10 @@ export function VoiceTranslateTextarea({
             >
               <Mic className="h-3 w-3" />
               <span>
-                {isOfflineRecording
-                  ? `REC ${Math.floor(audioRecordDuration / 60)}:${(audioRecordDuration % 60)
-                      .toString()
-                      .padStart(2, "0")} • OFFLINE`
-                  : `LIVE • ${activeLangConfig.label}`}
+                REC {Math.floor(audioRecordDuration / 60)}:{(audioRecordDuration % 60)
+                  .toString()
+                  .padStart(2, "0")} • {activeLangConfig.label}
               </span>
-            </Badge>
-          )}
-
-          {!isOnline && (
-            <Badge variant="outline" className="text-amber-500 border-amber-500/40 text-[0.62rem] flex items-center gap-1">
-              <WifiOff className="h-2.5 w-2.5" />
-              <span>Offline Mode</span>
             </Badge>
           )}
 
