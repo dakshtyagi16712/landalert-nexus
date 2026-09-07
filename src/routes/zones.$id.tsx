@@ -1302,13 +1302,30 @@ function ZonePage() {
                     {canViewMedia ? (
                       <div className="flex flex-wrap gap-3 mt-2">
                         {obs.media_urls.map((url: string, idx: number) => {
-                          const isVideo = url.endsWith(".mp4") || url.endsWith(".webm") || url.includes("video");
+                          const isAudio =
+                            url.endsWith(".mp3") ||
+                            url.endsWith(".wav") ||
+                            url.endsWith(".ogg") ||
+                            url.endsWith(".m4a") ||
+                            url.includes("voice_memo") ||
+                            url.includes("audio");
+                          const isVideo =
+                            !isAudio &&
+                            (url.endsWith(".mp4") || url.endsWith(".mov") || url.includes("video"));
+
                           return (
-                            <div key={idx} className="relative rounded overflow-hidden border border-border bg-black/40 h-24 w-36 flex items-center justify-center">
-                              {isVideo ? (
-                                <video src={url} controls className="h-full w-full object-cover" />
+                            <div key={idx} className="relative rounded overflow-hidden border border-border bg-black/40 p-1 flex items-center justify-center min-w-[140px]">
+                              {isAudio ? (
+                                <div className="p-2 flex flex-col gap-1 w-full bg-secondary/30 rounded">
+                                  <span className="text-[0.65rem] text-muted-foreground font-mono flex items-center gap-1">
+                                    🎙️ Voice Note {idx + 1}
+                                  </span>
+                                  <audio src={url} controls className="w-48 h-8" />
+                                </div>
+                              ) : isVideo ? (
+                                <video src={url} controls className="h-24 w-36 object-contain" />
                               ) : (
-                                <a href={url} target="_blank" rel="noopener noreferrer">
+                                <a href={url} target="_blank" rel="noopener noreferrer" className="block h-24 w-36">
                                   <img src={url} alt={`Observation media ${idx + 1}`} className="h-full w-full object-cover hover:scale-105 transition-transform" />
                                 </a>
                               )}

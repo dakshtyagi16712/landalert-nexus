@@ -291,7 +291,7 @@ export async function syncFieldObservations(records: FieldObservationInput[]): P
           INSERT INTO public.field_observations 
           (zone_id, observer_id, observed_at, client_timestamp, rainfall_mm, soil_condition, visual_signs, road_status, idempotency_key, sync_status, status, is_training_eligible, source, media_urls, media_metadata, geo_lat, geo_lng, geo_accuracy_m, geo_captured_at, consent_given, review_status)
           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'synced', $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
-          ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING;
+          ON CONFLICT (idempotency_key) DO NOTHING;
         `,
           [
             r.zone_id,
@@ -369,9 +369,10 @@ export async function syncFieldObservations(records: FieldObservationInput[]): P
       const key = r.idempotency_key || String(idx);
       baseVisualSignsMap.set(key, r.visual_signs || "");
     });
+
     let usePlainInsert = false;
 
-    for (let attempt = 0; attempt < 12; attempt++) {
+    for (let attempt = 0; attempt < 35; attempt++) {
       const query = usePlainInsert
         ? supabaseAdmin.from("field_observations").insert(currentRows as any)
         : supabaseAdmin.from("field_observations").upsert(currentRows as any, {
@@ -388,13 +389,23 @@ export async function syncFieldObservations(records: FieldObservationInput[]): P
 
       lastError = upsertErr;
 
-      // Handle missing unique/exclusion constraint for ON CONFLICT specification
+      // If ON CONFLICT unique constraint is missing, switch to plain insert
       if (
         upsertErr.message.includes("unique or exclusion constraint") ||
         upsertErr.message.includes("ON CONFLICT")
       ) {
         usePlainInsert = true;
         continue;
+      }
+
+      // If duplicate key error occurs on plain insert, treat already-synced rows as success
+      if (
+        upsertErr.message.includes("duplicate key") ||
+        upsertErr.message.includes("already exists") ||
+        (upsertErr as any).code === "23505"
+      ) {
+        syncSuccess = true;
+        break;
       }
 
       // Handle missing column in PostgREST schema cache
@@ -409,7 +420,7 @@ export async function syncFieldObservations(records: FieldObservationInput[]): P
             const copy = { ...row };
             delete copy[missingCol];
 
-            // Embed stripped metadata into visual_signs safely without corrupting base signs
+            // Embed stripped metadata into visual_signs / evidence_summary safely
             const metaJson = JSON.stringify(strippedMetadata[key]);
             const baseSigns = baseVisualSignsMap.get(key) || "";
             copy.visual_signs = baseSigns

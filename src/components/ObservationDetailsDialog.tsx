@@ -23,6 +23,8 @@ import {
   ArrowLeft,
   Image as ImageIcon,
   Video as VideoIcon,
+  Volume2,
+  Play,
   Trash2,
 } from "lucide-react";
 import { FieldObservationDialog } from "./FieldObservationDialog";
@@ -471,12 +473,35 @@ export function ObservationDetailsDialog({
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                       {items.map((item) => {
+                        const isAudio =
+                          item.mimeType?.startsWith("audio/") ||
+                          item.name?.endsWith(".mp3") ||
+                          item.name?.endsWith(".wav") ||
+                          item.name?.endsWith(".ogg") ||
+                          item.name?.endsWith(".m4a") ||
+                          item.name?.includes("voice_memo") ||
+                          (item.name?.endsWith(".webm") && !item.mimeType?.includes("video"));
+
                         const isVideo =
-                          item.mimeType?.startsWith("video/") ||
-                          item.name?.endsWith(".mp4") ||
-                          item.name?.endsWith(".mov");
+                          !isAudio &&
+                          (item.mimeType?.startsWith("video/") ||
+                            item.name?.endsWith(".mp4") ||
+                            item.name?.endsWith(".mov") ||
+                            (item.name?.endsWith(".webm") && Boolean(item.mimeType?.startsWith("video/"))));
 
                         if (item.url) {
+                          if (isAudio) {
+                            return (
+                              <div key={item.key} className="rounded border border-border bg-secondary/30 p-2.5 flex flex-col gap-2">
+                                <div className="flex items-center gap-2 text-xs font-semibold text-foreground">
+                                  <Volume2 className="h-4 w-4 text-primary shrink-0" />
+                                  <span className="truncate">{item.name || "Audio Recording"}</span>
+                                </div>
+                                <audio src={item.url} controls className="w-full h-8" />
+                              </div>
+                            );
+                          }
+
                           if (isVideo) {
                             return (
                               <div key={item.key} className="rounded border border-border bg-black/40 overflow-hidden">
@@ -485,6 +510,7 @@ export function ObservationDetailsDialog({
                               </div>
                             );
                           }
+
                           return (
                             <a
                               key={item.key}
@@ -512,13 +538,15 @@ export function ObservationDetailsDialog({
                             className="rounded border border-border/80 bg-secondary/30 p-2.5 flex items-center gap-2.5"
                           >
                             <div className="p-2 rounded bg-primary/10 text-primary shrink-0">
-                              {isVideo ? <VideoIcon className="h-4 w-4" /> : <ImageIcon className="h-4 w-4" />}
+                              {isAudio ? <Volume2 className="h-4 w-4" /> : isVideo ? <VideoIcon className="h-4 w-4" /> : <ImageIcon className="h-4 w-4" />}
                             </div>
                             <div className="min-w-0 flex-1">
                               <div className="text-xs font-semibold text-foreground truncate">{item.name}</div>
                               <div className="text-[0.65rem] text-muted-foreground flex items-center gap-1.5 mt-0.5">
                                 <span>{item.size ? `${(item.size / 1024 / 1024).toFixed(2)} MB` : "Field File"}</span>
-                                <span className="text-primary font-medium">• Staged Evidence</span>
+                                <span className="text-primary font-medium">
+                                  • {isAudio ? "Offline Audio" : isVideo ? "Offline Video" : "Offline Photo"}
+                                </span>
                               </div>
                             </div>
                           </div>

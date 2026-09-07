@@ -23,7 +23,7 @@ import { submitFieldObservationsServerFn } from "@/lib/monitoring.functions";
 import type { FieldObservationInput } from "@/lib/sync.service";
 import { supabase } from "@/integrations/supabase/client";
 import { getUserAuthorizationState } from "@/lib/auth-domains";
-import { Camera, Video, Upload } from "lucide-react";
+import { Camera, Video, Upload, Volume2, Eye, Play } from "lucide-react";
 import { ObservationCameraModal } from "@/components/ObservationCameraModal";
 import { VoiceTranslateTextarea } from "@/components/VoiceTranslateTextarea";
 import { useUserLocation } from "@/hooks/useUserLocation";
@@ -249,6 +249,7 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
 
   // 4. Media Upload (Photo/Video) & Camera System
   const [mediaList, setMediaList] = useState<MediaItem[]>([]);
+  const [previewMedia, setPreviewMedia] = useState<MediaItem | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
   const [cameraModalOpen, setCameraModalOpen] = useState(false);
   const [cameraModalMode, setCameraModalMode] = useState<"photo" | "video">("photo");
@@ -1038,49 +1039,99 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
             {fileError && <p className="text-[0.7rem] text-destructive font-mono">{fileError}</p>}
 
             {mediaList.length > 0 && (
-              <div className="flex flex-wrap gap-2 pt-1">
+              <div className="flex flex-col gap-2 pt-1">
                 {mediaList.map((item, idx) => {
                   const isImg = item.mimeType.startsWith("image/");
+                  const isAudio =
+                    item.mimeType.startsWith("audio/") ||
+                    item.name.endsWith(".webm") ||
+                    item.name.endsWith(".mp3") ||
+                    item.name.endsWith(".wav");
+                  const isVideo = !isAudio && item.mimeType.startsWith("video/");
                   const sizeStr =
                     item.size > 1024 * 1024
                       ? `${(item.size / (1024 * 1024)).toFixed(1)} MB`
                       : `${Math.round(item.size / 1024)} KB`;
-                  const typeLabel =
-                    item.mimeType.split("/")[1]?.toUpperCase() || (isImg ? "IMAGE" : "VIDEO");
+                  const typeLabel = isAudio
+                    ? "AUDIO"
+                    : isVideo
+                    ? "VIDEO"
+                    : "PHOTO";
 
                   return (
                     <div
                       key={idx}
-                      className="relative group border border-border rounded overflow-hidden bg-surface flex items-center gap-2 p-1.5 pr-2.5"
+                      className="border border-border/80 rounded bg-secondary/20 p-2 flex flex-col gap-1.5"
                     >
-                      {isImg ? (
-                        <img
-                          src={item.previewUrl}
-                          alt={item.name}
-                          className="h-11 w-11 object-cover rounded"
-                        />
-                      ) : (
-                        <div className="h-11 w-11 flex flex-col items-center justify-center bg-primary/20 text-xs rounded">
-                          <span className="text-base">🎬</span>
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          {isAudio ? (
+                            <div className="h-8 w-8 rounded bg-primary/20 flex items-center justify-center shrink-0">
+                              <Volume2 className="h-4 w-4 text-primary" />
+                            </div>
+                          ) : isVideo ? (
+                            <div className="h-8 w-8 rounded bg-primary/20 flex items-center justify-center shrink-0">
+                              <Video className="h-4 w-4 text-primary" />
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setPreviewMedia(item)}
+                              className="h-8 w-8 rounded overflow-hidden shrink-0 border border-border group relative cursor-pointer"
+                              title="Click to view full photo"
+                            >
+                              <img src={item.previewUrl} alt={item.name} className="h-full w-full object-cover" />
+                            </button>
+                          )}
+                          <div className="flex flex-col text-left font-mono text-[0.68rem] min-w-0">
+                            <span className="truncate font-semibold text-foreground max-w-[180px]" title={item.name}>
+                              {item.name}
+                            </span>
+                            <span className="text-[0.62rem] text-muted-foreground">
+                              {typeLabel} • {sizeStr}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {!isAudio && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setPreviewMedia(item)}
+                              className="h-6 px-2 text-[0.65rem] font-mono gap-1 text-primary hover:text-primary hover:bg-primary/10"
+                              title={isVideo ? "Play video" : "View photo"}
+                            >
+                              {isVideo ? <Play className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                              <span>{isVideo ? "Play" : "View"}</span>
+                            </Button>
+                          )}
+                          <button
+                            type="button"
+                            aria-label={`Remove media ${item.name}`}
+                            onClick={() => handleRemoveMedia(idx)}
+                            className="text-muted-foreground hover:text-destructive text-sm font-bold px-1.5 cursor-pointer"
+                            title="Remove"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Inline Player for Audio */}
+                      {isAudio && (
+                        <div className="w-full bg-card/60 p-1.5 rounded border border-border/50">
+                          <audio src={item.previewUrl} controls className="w-full h-8" />
                         </div>
                       )}
-                      <div className="flex flex-col text-left font-mono text-[0.68rem] min-w-0 max-w-[150px]">
-                        <span className="truncate font-semibold text-foreground" title={item.name}>
-                          {item.name}
-                        </span>
-                        <span className="text-[0.62rem] text-muted-foreground">
-                          {typeLabel} • {sizeStr}
-                        </span>
-                      </div>
-                      <button
-                        type="button"
-                        aria-label={`Remove media ${item.name}`}
-                        onClick={() => handleRemoveMedia(idx)}
-                        className="text-muted-foreground hover:text-destructive text-sm font-bold ml-auto px-1 cursor-pointer"
-                        title="Remove"
-                      >
-                        ×
-                      </button>
+
+                      {/* Inline Video Player */}
+                      {isVideo && (
+                        <div className="w-full bg-black/40 rounded overflow-hidden">
+                          <video src={item.previewUrl} controls className="max-h-36 w-full object-contain" />
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -1205,6 +1256,37 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
       initialMode={cameraModalMode}
       onCapture={processCapturedFile}
     />
+
+    {/* Media Preview Lightbox Modal */}
+    {previewMedia && (
+      <Dialog open={Boolean(previewMedia)} onOpenChange={() => setPreviewMedia(null)}>
+        <DialogContent className="max-w-2xl bg-card border-border p-4">
+          <DialogHeader>
+            <DialogTitle className="text-sm font-mono truncate">{previewMedia.name}</DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              {previewMedia.mimeType} • {Math.round(previewMedia.size / 1024)} KB
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex items-center justify-center p-2 min-h-[200px] max-h-[70vh] overflow-hidden bg-black/50 rounded">
+            {previewMedia.mimeType.startsWith("image/") ? (
+              <img src={previewMedia.previewUrl} alt={previewMedia.name} className="max-h-[65vh] w-auto object-contain rounded" />
+            ) : previewMedia.mimeType.startsWith("video/") ? (
+              <video src={previewMedia.previewUrl} controls autoPlay className="max-h-[65vh] w-full rounded" />
+            ) : (
+              <div className="w-full p-6 flex flex-col items-center gap-3">
+                <Volume2 className="h-10 w-10 text-primary animate-pulse" />
+                <audio src={previewMedia.previewUrl} controls autoPlay className="w-full" />
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" size="sm" onClick={() => setPreviewMedia(null)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    )}
   </>
   );
 }
