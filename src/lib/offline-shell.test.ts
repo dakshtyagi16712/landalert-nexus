@@ -583,10 +583,11 @@ describe("LandAlert-Nexus Offline App Shell & Service Worker Specification", () 
       expect(workerPy).toContain("'UNAVAILABLE', NULL, NULL, NULL");
     });
 
-    it("Z. Console shell navigation integrates /observations route", () => {
+    it("Z. Console shell navigation scrolls down to recent-observations section", () => {
       const consoleShellPath = path.resolve(__dirname, "../components/ConsoleShell.tsx");
       const content = fs.readFileSync(consoleShellPath, "utf-8");
-      expect(content).toContain("<NavLink to=\"/observations\" label={t(\"nav.observations\", \"Observations\")} />");
+      expect(content).toContain('href="/#recent-observations"');
+      expect(content).toContain('handleNavToSection(e, "recent-observations")');
     });
 
     it("AA. SyncQueueDialog renders synced observations even when pending queue is empty", () => {

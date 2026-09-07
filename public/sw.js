@@ -10,7 +10,7 @@
  * 5. Strict offline data semantics: NO fabricated weather, ML, or alerts
  */
 
-const CACHE_NAME = "landalert-pwa-va899d69887";
+const CACHE_NAME = "landalert-pwa-vae15337671";
 const MAP_CACHE = "landalert-tiles-v1";
 const DATA_CACHE = "landalert-data-v1";
 
@@ -18,14 +18,14 @@ const PRECACHE_ASSETS = [
   "/",
   "/alerts",
   "/apple-touch-icon.png",
-  "/assets/ConsoleShell-CKFGltYU.js",
+  "/assets/ConsoleShell-CygB1CMB.js",
   "/assets/FieldObservationDialog-DoR4eoU5.js",
   "/assets/MapCanvas-Bqk0WCS1.js",
   "/assets/RiskBits-DIcflXHI.js",
   "/assets/RiskMap-CalB6Loj.js",
   "/assets/RiskMap-vh-t_kPv.css",
-  "/assets/alerts--dWx0IQ8.js",
-  "/assets/alerts-BUao8EDg.js",
+  "/assets/alerts-DLfAQBW3.js",
+  "/assets/alerts-Dp33504o.js",
   "/assets/atkinson-hyperlegible-latin-400-normal-BbWidj28.woff",
   "/assets/atkinson-hyperlegible-latin-400-normal-BrHNak5F.woff2",
   "/assets/atkinson-hyperlegible-latin-ext-400-normal-Bbz-b3yf.woff",
@@ -34,21 +34,21 @@ const PRECACHE_ASSETS = [
   "/assets/client-D2HHhMwr.js",
   "/assets/dist-Btb5Jv1E.js",
   "/assets/geo-translations-Df2VNEtI.js",
-  "/assets/index-raHO879Y.js",
+  "/assets/index-wKUgT_dz.js",
   "/assets/lock-DRCxS8gL.js",
-  "/assets/observations--dWx0IQ8.js",
+  "/assets/observations-DLfAQBW3.js",
   "/assets/offline-media-store-BuzdrYhz.js",
   "/assets/queryOptions-BIFxg3nk.js",
   "/assets/risk-CkQ7Hukn.js",
   "/assets/rolldown-runtime-hePW80VL.js",
   "/assets/route-CDY9Qrxi.js",
-  "/assets/routes--dWx0IQ8.js",
-  "/assets/routes-B-GFq8eN.js",
+  "/assets/routes-DLfAQBW3.js",
+  "/assets/routes-mPtKkFD1.js",
   "/assets/styles-UHTRDbZq.css",
   "/assets/useNavigate-BLBZxB2e.js",
   "/assets/web-Dqf9dW0a.js",
-  "/assets/zones._id--dWx0IQ8.js",
-  "/assets/zones._id-DQQ3gNCT.js",
+  "/assets/zones._id-DLfAQBW3.js",
+  "/assets/zones._id-lezTp7Lo.js",
   "/emblem-of-india.svg",
   "/favicon.ico",
   "/favicon.svg",
