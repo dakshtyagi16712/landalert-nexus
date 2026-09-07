@@ -237,8 +237,9 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
     accuracy: geoAccuracy,
     capturedAt: geoCapturedAt,
     statusText: gpsStatus,
+    loading: gpsLoading,
     requestLocation,
-  } = useUserLocation();
+  } = useUserLocation({ autoRequest: true });
 
   const captureGps = async () => {
     const loc = await requestLocation({ force: true });
@@ -246,6 +247,24 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
       autoLocateFromGps(loc.lat, loc.lng);
     }
   };
+
+  // Automatically fetch & auto-locate GPS coordinates when observation dialog opens
+  useEffect(() => {
+    if (!open) return;
+
+    if (geoLat !== null && geoLng !== null) {
+      if (!initialZoneId) {
+        autoLocateFromGps(geoLat, geoLng);
+      }
+    } else {
+      // Auto-fetch if not already in cache
+      requestLocation({ force: false }).then((loc) => {
+        if (loc && !initialZoneId) {
+          autoLocateFromGps(loc.lat, loc.lng);
+        }
+      });
+    }
+  }, [open, geoLat, geoLng, initialZoneId, requestLocation]);
 
   // 4. Media Upload (Photo/Video) & Camera System
   const [mediaList, setMediaList] = useState<MediaItem[]>([]);
@@ -1170,12 +1189,28 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
             )}
           </div>
 
-          {/* 4. GPS Geolocation Capture */}
+          {/* 4. GPS Geolocation - Automatically Captured */}
           <div className="flex items-center justify-between rounded border border-border/70 bg-secondary/10 px-3 py-2">
             <div className="space-y-0.5">
-              <div className="text-xs font-mono uppercase text-muted-foreground">{t("field_observation.gps_label", "GPS Location")}</div>
-              <div className="text-[0.7rem] font-mono text-foreground">
-                {gpsStatus || t("field_observation.gps_not_captured", "Not captured yet")}
+              <div className="flex items-center gap-1.5 text-xs font-mono uppercase text-muted-foreground">
+                <span>📍 {t("field_observation.gps_label", "GPS Location")}</span>
+                {geoLat !== null && geoLng !== null ? (
+                  <span className="inline-flex items-center rounded-full bg-emerald-500/20 px-1.5 py-0.2 text-[0.62rem] font-medium text-emerald-600 dark:text-emerald-400">
+                    ✓ {t("field_observation.auto_fetched", "Auto-Fetched")}
+                  </span>
+                ) : gpsLoading ? (
+                  <span className="inline-flex items-center gap-1 text-[0.62rem] text-primary">
+                    <span className="inline-block h-2 w-2 rounded-full border border-primary border-t-transparent animate-spin" />
+                    {t("field_observation.fetching_gps", "Fetching...")}
+                  </span>
+                ) : null}
+              </div>
+              <div className="text-[0.7rem] font-mono text-foreground font-medium">
+                {geoLat !== null && geoLng !== null
+                  ? `${geoLat.toFixed(4)}°N, ${geoLng.toFixed(4)}°E (±${Math.round(geoAccuracy || 5)}m)`
+                  : gpsLoading
+                    ? t("field_observation.fetching_gps_desc", "Acquiring device GPS automatically...")
+                    : gpsStatus || t("field_observation.gps_not_captured", "Acquiring GPS location...")}
               </div>
             </div>
             <Button

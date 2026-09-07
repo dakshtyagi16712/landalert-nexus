@@ -221,7 +221,10 @@
     "error_video_size": "A·chik Video {{name}} exceeds 50MB limit.",
     "error_image_size": "A·chik Image {{name}} exceeds 10MB limit.",
     "error_format": "A·chik Unsupported format: {{name}}. Only photos and videos allowed.",
-    "network_error": "A·chik Network error encountered. Observation preserved in offline queue."
+    "network_error": "A·chik Network error encountered. Observation preserved in offline queue.",
+    "auto_fetched": "An·tangon ra·a",
+    "fetching_gps": "Ra·enga...",
+    "fetching_gps_desc": "Device GPS-ko an·tangon ra·enga..."
   },
   "offline": {
     "banner_title": "Internet Gri Mode — Cached Risk Data",

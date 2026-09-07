@@ -221,7 +221,10 @@
     "error_video_size": "हिन्दी Video {{name}} exceeds 50MB limit.",
     "error_image_size": "हिन्दी Image {{name}} exceeds 10MB limit.",
     "error_format": "हिन्दी Unsupported format: {{name}}. Only photos and videos allowed.",
-    "network_error": "हिन्दी Network error encountered. Observation preserved in offline queue."
+    "network_error": "हिन्दी Network error encountered. Observation preserved in offline queue.",
+    "auto_fetched": "स्वतः प्राप्त",
+    "fetching_gps": "प्राप्त हो रहा है...",
+    "fetching_gps_desc": "डिवाइस जीपीएस स्वतः प्राप्त किया जा रहा है..."
   },
   "offline": {
     "banner_title": "ऑफलाइन मोड — कैश्ड जोखिम डेटा",

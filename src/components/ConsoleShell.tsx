@@ -16,6 +16,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { getUserAuthorizationState } from "@/lib/auth-domains";
 import { searchGeography, type SearchResultItem } from "@/lib/geography";
 import type { User } from "@supabase/supabase-js";
+import { captureGlobalUserLocation } from "@/hooks/useUserLocation";
 import "@/lib/i18n";
 
 export function ConsoleNav() {
@@ -28,13 +29,21 @@ export function ConsoleNav() {
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
+      const u = session?.user ?? null;
+      setUser(u);
+      if (u) {
+        captureGlobalUserLocation();
+      }
     });
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
+      const u = session?.user ?? null;
+      setUser(u);
+      if (u) {
+        captureGlobalUserLocation();
+      }
     });
 
     return () => subscription.unsubscribe();

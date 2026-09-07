@@ -221,7 +221,10 @@
     "error_video_size": "Mizo Video {{name}} exceeds 50MB limit.",
     "error_image_size": "Mizo Image {{name}} exceeds 10MB limit.",
     "error_format": "Mizo Unsupported format: {{name}}. Only photos and videos allowed.",
-    "network_error": "Mizo Network error encountered. Observation preserved in offline queue."
+    "network_error": "Mizo Network error encountered. Observation preserved in offline queue.",
+    "auto_fetched": "Auto-chhut",
+    "fetching_gps": "Lut mek...",
+    "fetching_gps_desc": "Device GPS lak mek a ni..."
   },
   "offline": {
     "banner_title": "Mizo Offline Mode — Cached Risk Data",

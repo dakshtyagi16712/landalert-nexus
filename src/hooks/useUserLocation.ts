@@ -4,7 +4,8 @@
  * Shared Geolocation hook for LandAlert-Nexus.
  * Uses Capacitor Geolocation for native/mobile platforms with fallback to
  * navigator.geolocation for standard browsers.
- * Caches detected location in session memory to prevent continuous permission re-prompts.
+ * Caches detected location in memory and session/local storage to prevent continuous permission re-prompts.
+ * Emits and listens to global location events so all components stay in sync.
  */
 
 import { useState, useEffect, useCallback, useRef } from "react";
@@ -18,8 +19,109 @@ export interface CachedLocation {
   capturedAt: string;
 }
 
-// Session-level memory cache so multiple components and re-renders share the same session location
-let sessionLocationCache: CachedLocation | null = null;
+const LOCATION_STORAGE_KEY = "landalert_user_location";
+
+function getStoredLocation(): CachedLocation | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = sessionStorage.getItem(LOCATION_STORAGE_KEY) || localStorage.getItem(LOCATION_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (typeof parsed?.lat === "number" && typeof parsed?.lng === "number") {
+        return parsed as CachedLocation;
+      }
+    }
+  } catch {}
+  return null;
+}
+
+function saveStoredLocation(loc: CachedLocation): void {
+  if (typeof window === "undefined") return;
+  try {
+    const serialized = JSON.stringify(loc);
+    sessionStorage.setItem(LOCATION_STORAGE_KEY, serialized);
+    localStorage.setItem(LOCATION_STORAGE_KEY, serialized);
+  } catch {}
+}
+
+// Session-level memory cache initialized from persistent storage if available
+let sessionLocationCache: CachedLocation | null = getStoredLocation();
+
+/**
+ * Standalone helper to capture or return cached user location.
+ * Can be invoked on sign-in or app boot without needing a React component mount.
+ */
+export async function captureGlobalUserLocation(force = false): Promise<CachedLocation | null> {
+  if (!force && sessionLocationCache) {
+    return sessionLocationCache;
+  }
+
+  // 1. Native Mobile Platform (Capacitor)
+  const isNative = Capacitor.isNativePlatform();
+  if (isNative) {
+    try {
+      const perm = await CapGeolocation.checkPermissions();
+      if (perm.location !== "granted") {
+        const req = await CapGeolocation.requestPermissions();
+        if (req.location !== "granted") {
+          return null;
+        }
+      }
+
+      const pos = await CapGeolocation.getCurrentPosition({
+        enableHighAccuracy: true,
+        timeout: 10000,
+      });
+
+      const res: CachedLocation = {
+        lat: Number(pos.coords.latitude.toFixed(5)),
+        lng: Number(pos.coords.longitude.toFixed(5)),
+        accuracy: Number(pos.coords.accuracy ? pos.coords.accuracy.toFixed(1) : "5.0"),
+        capturedAt: new Date(pos.timestamp).toISOString(),
+      };
+
+      sessionLocationCache = res;
+      saveStoredLocation(res);
+
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("landalert-location-captured", { detail: res }));
+      }
+      return res;
+    } catch (err) {
+      console.warn("[captureGlobalUserLocation] Native Geolocation failed, trying browser API:", err);
+    }
+  }
+
+  // 2. Web Browser Fallback (navigator.geolocation)
+  const hasNavGeo = typeof navigator !== "undefined" && Boolean(navigator.geolocation);
+  if (!hasNavGeo) return null;
+
+  return new Promise<CachedLocation | null>((resolve) => {
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const res: CachedLocation = {
+          lat: Number(pos.coords.latitude.toFixed(5)),
+          lng: Number(pos.coords.longitude.toFixed(5)),
+          accuracy: Number(pos.coords.accuracy ? pos.coords.accuracy.toFixed(1) : "5.0"),
+          capturedAt: new Date(pos.timestamp).toISOString(),
+        };
+
+        sessionLocationCache = res;
+        saveStoredLocation(res);
+
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("landalert-location-captured", { detail: res }));
+        }
+        resolve(res);
+      },
+      (err) => {
+        console.warn("[captureGlobalUserLocation] Browser geolocation error:", err.message);
+        resolve(null);
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+    );
+  });
+}
 
 export interface UseUserLocationOptions {
   autoRequest?: boolean;
@@ -41,13 +143,14 @@ export interface UseUserLocationResult {
 export function useUserLocation(options: UseUserLocationOptions = {}): UseUserLocationResult {
   const { autoRequest = false } = options;
 
-  const [location, setLocation] = useState<CachedLocation | null>(sessionLocationCache);
+  const [location, setLocation] = useState<CachedLocation | null>(() => sessionLocationCache || getStoredLocation());
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [permissionDenied, setPermissionDenied] = useState<boolean>(false);
   const [statusText, setStatusText] = useState<string | null>(() => {
-    if (sessionLocationCache) {
-      return `GPS Acquired: ${sessionLocationCache.lat.toFixed(4)}°N, ${sessionLocationCache.lng.toFixed(4)}°E (±${Math.round(sessionLocationCache.accuracy || 5)}m)`;
+    const loc = sessionLocationCache || getStoredLocation();
+    if (loc) {
+      return `GPS Acquired: ${loc.lat.toFixed(4)}°N, ${loc.lng.toFixed(4)}°E (±${Math.round(loc.accuracy || 5)}m)`;
     }
     return null;
   });
@@ -60,6 +163,27 @@ export function useUserLocation(options: UseUserLocationOptions = {}): UseUserLo
     };
   }, []);
 
+  // Listen to global location capture events across components & auth triggers
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handleLocationCaptured = (e: Event) => {
+      const detail = (e as CustomEvent<CachedLocation>).detail;
+      if (detail && isMountedRef.current) {
+        setLocation(detail);
+        setPermissionDenied(false);
+        setLoading(false);
+        setError(null);
+        setStatusText(
+          `GPS Acquired: ${detail.lat.toFixed(4)}°N, ${detail.lng.toFixed(4)}°E (±${Math.round(detail.accuracy || 5)}m)`
+        );
+      }
+    };
+    window.addEventListener("landalert-location-captured", handleLocationCaptured);
+    return () => {
+      window.removeEventListener("landalert-location-captured", handleLocationCaptured);
+    };
+  }, []);
+
   const clearError = useCallback(() => {
     setError(null);
   }, []);
@@ -67,17 +191,21 @@ export function useUserLocation(options: UseUserLocationOptions = {}): UseUserLo
   const requestLocation = useCallback(
     async (opts?: { force?: boolean }): Promise<CachedLocation | null> => {
       const force = opts?.force ?? false;
-      console.log("[useUserLocation] requestLocation called. force =", force, "sessionLocationCache =", sessionLocationCache);
 
       // Return cached location if available and refresh not forced
-      if (!force && sessionLocationCache) {
-        console.log("[useUserLocation] Returning cached location:", sessionLocationCache);
-        if (isMountedRef.current) {
-          setLocation(sessionLocationCache);
-          setLoading(false);
-          setError(null);
+      if (!force) {
+        const cached = sessionLocationCache || getStoredLocation();
+        if (cached) {
+          if (isMountedRef.current) {
+            setLocation(cached);
+            setLoading(false);
+            setError(null);
+            setStatusText(
+              `GPS Acquired: ${cached.lat.toFixed(4)}°N, ${cached.lng.toFixed(4)}°E (±${Math.round(cached.accuracy || 5)}m)`
+            );
+          }
+          return cached;
         }
-        return sessionLocationCache;
       }
 
       if (isMountedRef.current) {
@@ -86,128 +214,36 @@ export function useUserLocation(options: UseUserLocationOptions = {}): UseUserLo
         setStatusText("Acquiring GPS location…");
       }
 
-      // 1. Native Mobile Platform (Capacitor)
-      const isNative = Capacitor.isNativePlatform();
-      console.log("[useUserLocation] Checking platform. Capacitor.isNativePlatform() =", isNative);
-      if (isNative) {
-        try {
-          console.log("[useUserLocation] Calling CapGeolocation.checkPermissions()...");
-          const perm = await CapGeolocation.checkPermissions();
-          console.log("[useUserLocation] CapGeolocation.checkPermissions() result:", perm);
-          if (perm.location !== "granted") {
-            console.log("[useUserLocation] Requesting native permissions...");
-            const req = await CapGeolocation.requestPermissions();
-            console.log("[useUserLocation] CapGeolocation.requestPermissions() result:", req);
-            if (req.location !== "granted") {
-              console.log("[useUserLocation] Native permission denied branch hit.");
-              if (isMountedRef.current) {
-                setPermissionDenied(true);
-                setError("GPS permission denied by user");
-                setStatusText("GPS permission denied by user");
-                setLoading(false);
-              }
-              return null;
-            }
-          }
+      const res = await captureGlobalUserLocation(force);
 
-          console.log("[useUserLocation] Calling CapGeolocation.getCurrentPosition()...");
-          const pos = await CapGeolocation.getCurrentPosition({
-            enableHighAccuracy: true,
-            timeout: 10000,
-          });
-          console.log("[useUserLocation] CapGeolocation.getCurrentPosition() success:", pos);
-
-          const res: CachedLocation = {
-            lat: Number(pos.coords.latitude.toFixed(5)),
-            lng: Number(pos.coords.longitude.toFixed(5)),
-            accuracy: Number(pos.coords.accuracy ? pos.coords.accuracy.toFixed(1) : "5.0"),
-            capturedAt: new Date(pos.timestamp).toISOString(),
-          };
-
-          sessionLocationCache = res;
-
-          if (isMountedRef.current) {
-            setLocation(res);
-            setPermissionDenied(false);
-            setLoading(false);
-            setError(null);
-            setStatusText(
-              `GPS Acquired (Native): ${res.lat.toFixed(4)}°N, ${res.lng.toFixed(4)}°E (±${Math.round(res.accuracy || 5)}m)`,
-            );
-          }
-          return res;
-        } catch (err: any) {
-          console.warn("[useUserLocation] Native Geolocation failed, falling back to browser API:", err);
+      if (isMountedRef.current) {
+        setLoading(false);
+        if (res) {
+          setLocation(res);
+          setPermissionDenied(false);
+          setError(null);
+          setStatusText(
+            `GPS Acquired: ${res.lat.toFixed(4)}°N, ${res.lng.toFixed(4)}°E (±${Math.round(res.accuracy || 5)}m)`
+          );
+        } else {
+          setError("Unable to retrieve device GPS coordinates");
         }
       }
-
-      // 2. Web Browser Fallback (navigator.geolocation)
-      const hasNavGeo = typeof navigator !== "undefined" && Boolean(navigator.geolocation);
-      console.log("[useUserLocation] Checking browser geolocation support. navigator.geolocation =", hasNavGeo);
-      if (!hasNavGeo) {
-        console.log("[useUserLocation] Browser geolocation NOT supported branch hit.");
-        if (isMountedRef.current) {
-          setError("Browser geolocation not supported");
-          setStatusText("Browser geolocation not supported");
-          setLoading(false);
-        }
-        return null;
-      }
-
-      console.log("[useUserLocation] Calling navigator.geolocation.getCurrentPosition()...");
-      return new Promise<CachedLocation | null>((resolve) => {
-        navigator.geolocation.getCurrentPosition(
-          (pos) => {
-            console.log("[useUserLocation] navigator.geolocation SUCCESS callback hit:", {
-              lat: pos.coords.latitude,
-              lng: pos.coords.longitude,
-              accuracy: pos.coords.accuracy,
-            });
-            const res: CachedLocation = {
-              lat: Number(pos.coords.latitude.toFixed(5)),
-              lng: Number(pos.coords.longitude.toFixed(5)),
-              accuracy: Number(pos.coords.accuracy ? pos.coords.accuracy.toFixed(1) : "5.0"),
-              capturedAt: new Date(pos.timestamp).toISOString(),
-            };
-
-            sessionLocationCache = res;
-
-            if (isMountedRef.current) {
-              setLocation(res);
-              setPermissionDenied(false);
-              setLoading(false);
-              setError(null);
-              setStatusText(
-                `GPS Acquired: ${res.lat.toFixed(4)}°N, ${res.lng.toFixed(4)}°E (±${Math.round(res.accuracy || 5)}m)`,
-              );
-            }
-            resolve(res);
-          },
-          (err) => {
-            console.warn("[useUserLocation] navigator.geolocation ERROR callback hit. code =", err.code, "message =", err.message);
-            const isDenied = err.code === 1; // PERMISSION_DENIED
-            if (isMountedRef.current) {
-              if (isDenied) {
-                setPermissionDenied(true);
-              }
-              setError(err.message || "Location request failed");
-              setStatusText(`GPS error: ${err.message}`);
-              setLoading(false);
-            }
-            resolve(null);
-          },
-          { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 },
-        );
-      });
+      return res;
     },
-    [],
+    []
   );
 
   useEffect(() => {
-    if (autoRequest && !sessionLocationCache) {
-      requestLocation({ force: false });
+    if (autoRequest) {
+      const cached = sessionLocationCache || getStoredLocation();
+      if (!cached) {
+        requestLocation({ force: false });
+      } else if (!location) {
+        setLocation(cached);
+      }
     }
-  }, [autoRequest, requestLocation]);
+  }, [autoRequest, requestLocation, location]);
 
   return {
     lat: location?.lat ?? null,

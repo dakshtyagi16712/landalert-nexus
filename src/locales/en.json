@@ -246,7 +246,10 @@
     "error_video_size": "Video {{name}} exceeds 50MB limit.",
     "error_image_size": "Image {{name}} exceeds 10MB limit.",
     "error_format": "Unsupported format: {{name}}. Only photos and videos allowed.",
-    "network_error": "Network error encountered. Observation preserved in offline queue."
+    "network_error": "Network error encountered. Observation preserved in offline queue.",
+    "auto_fetched": "Auto-Fetched",
+    "fetching_gps": "Fetching...",
+    "fetching_gps_desc": "Acquiring device GPS automatically..."
   },
   "offline": {
     "banner_title": "Offline Mode — Cached Risk Data",
