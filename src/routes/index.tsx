@@ -64,14 +64,30 @@ import type { User } from "@supabase/supabase-js";
 import { useUserLocation } from "@/hooks/useUserLocation";
 import { getUserAuthorizationState, type AppUserRole } from "@/lib/auth-domains";
 import { getObservationStatusMeta } from "@/lib/observation-status";
+import { getOfflineOverviewFallback, getQueuedObservations } from "@/lib/offline-manager";
 
 const overviewQuery = queryOptions({
   queryKey: ["overview"],
-  queryFn: () => getOverview(),
+  queryFn: async () => {
+    try {
+      return await getOverview();
+    } catch (err) {
+      console.warn("[Overview] Server query failed, using offline fallback:", err);
+      return getOfflineOverviewFallback();
+    }
+  },
+  staleTime: 60 * 1000,
 });
 
 export const Route = createFileRoute("/")({
-  loader: ({ context }) => context.queryClient.ensureQueryData(overviewQuery),
+  loader: async ({ context }) => {
+    try {
+      return await context.queryClient.ensureQueryData(overviewQuery);
+    } catch (err) {
+      console.warn("[Route Loader] Error fetching overview, falling back to offline data:", err);
+      return getOfflineOverviewFallback();
+    }
+  },
   head: () => ({
     meta: [
       { title: "LandAlert-Nexus — Landslide Early Warning System" },
@@ -425,10 +441,36 @@ function Dashboard() {
     return s.length > 0 ? s.join(" and ") : "Mizoram and Manipur";
   }, [highOrSevereZones]);
 
-  // Observations list (from database or default fallback)
+  const [queueUpdateSignal, setQueueUpdateSignal] = useState(0);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handleQueueChange = () => setQueueUpdateSignal((prev) => prev + 1);
+    window.addEventListener("landalert-queue-updated", handleQueueChange);
+    window.addEventListener("storage", handleQueueChange);
+    return () => {
+      window.removeEventListener("landalert-queue-updated", handleQueueChange);
+      window.removeEventListener("storage", handleQueueChange);
+    };
+  }, []);
+
+  // Observations list (combining offline pending queue and database observations)
   const observationsList = useMemo(() => {
-    return ((data as any).observations || []).slice(0, 5);
-  }, [data]);
+    const serverObs = (data as any).observations || [];
+    const queuedObs = getQueuedObservations().map((q) => ({
+      id: q.idempotency_key,
+      zone_id: q.zone_id,
+      observed_at: q.observed_at || q.client_timestamp || new Date().toISOString(),
+      rainfall_mm: q.rainfall_mm,
+      soil_condition: q.soil_condition,
+      visual_signs: q.visual_signs,
+      road_status: q.road_status,
+      status: "PENDING_SYNC",
+      review_status: "PENDING_SYNC",
+      is_offline_queued: true,
+    }));
+    return [...queuedObs, ...serverObs].slice(0, 8);
+  }, [data, queueUpdateSignal]);
 
   async function runRecompute() {
     setBusy(true);

@@ -32,9 +32,19 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
+import { getOfflineOverviewFallback } from "@/lib/offline-manager";
+
 const overviewQuery = queryOptions({
   queryKey: ["overview"],
-  queryFn: () => getOverview(),
+  queryFn: async () => {
+    try {
+      return await getOverview();
+    } catch (err) {
+      console.warn("[Alerts] Server query failed, using offline fallback:", err);
+      return getOfflineOverviewFallback();
+    }
+  },
+  staleTime: 60 * 1000,
 });
 
 const TEMPLATES: Record<
@@ -89,7 +99,14 @@ const TEMPLATES: Record<
 };
 
 export const Route = createFileRoute("/alerts")({
-  loader: ({ context }) => context.queryClient.ensureQueryData(overviewQuery),
+  loader: async ({ context }) => {
+    try {
+      return await context.queryClient.ensureQueryData(overviewQuery);
+    } catch (err) {
+      console.warn("[Alerts Loader] Error fetching overview, falling back to offline data:", err);
+      return getOfflineOverviewFallback();
+    }
+  },
   head: () => ({
     meta: [
       { title: "Alert Dispatch History — NER Landslide Console" },

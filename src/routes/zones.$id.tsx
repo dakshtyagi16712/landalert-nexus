@@ -88,10 +88,49 @@ interface ExposureSummary {
   } | null;
 }
 
+import { getZoneById } from "@/lib/geography";
+
 const zoneQuery = (id: number) =>
   queryOptions({
     queryKey: ["zone", id],
-    queryFn: () => getZoneDetail({ data: { id } }),
+    queryFn: async () => {
+      try {
+        return await getZoneDetail({ data: { id } });
+      } catch (err) {
+        const z = getZoneById(id);
+        if (z) {
+          return {
+            zone: {
+              id: z.id,
+              zone_name: z.name,
+              state: z.state,
+              district: z.district,
+              risk_score: 0,
+              current_risk_level: "UNKNOWN" as const,
+              antecedent_rainfall_mm: null,
+              intensity_rainfall_mm: null,
+              soil_moisture_pct: null,
+              dominant_slope_deg: 25,
+              critical_facilities_count: 0,
+              population_density: 0,
+              last_updated_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+              created_at: new Date().toISOString(),
+              explanation: "Offline View: Live server risk calculation unavailable. Field reporting active.",
+              scientific_limitation: "OFFLINE_CACHED_VIEW",
+            } as any,
+            readings: [],
+            roads: [],
+            slides: [],
+            alerts: [],
+            activeModel: null,
+            observations: [],
+          };
+        }
+        throw notFound();
+      }
+    },
+    staleTime: 60 * 1000,
   });
 
 export const Route = createFileRoute("/zones/$id")({

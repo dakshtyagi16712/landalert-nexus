@@ -10,21 +10,21 @@
  * 5. Strict offline data semantics: NO fabricated weather, ML, or alerts
  */
 
-const CACHE_NAME = "landalert-pwa-v4ec9922be9";
+const CACHE_NAME = "landalert-pwa-v44b2dbd4c7";
 const MAP_CACHE = "landalert-tiles-v1";
 const DATA_CACHE = "landalert-data-v1";
 
 const PRECACHE_ASSETS = [
   "/",
   "/apple-touch-icon.png",
-  "/assets/ConsoleShell-CloztkJ4.js",
-  "/assets/FieldObservationDialog-CP89RH18.js",
-  "/assets/MapCanvas-dPpQWRJg.js",
-  "/assets/RiskBits-CiEotVbN.js",
+  "/assets/ConsoleShell-PT9Ogztd.js",
+  "/assets/FieldObservationDialog-DyvQQvXL.js",
+  "/assets/MapCanvas-BOmwlxpK.js",
+  "/assets/RiskBits-QxjeUa5G.js",
   "/assets/RiskMap-CalB6Loj.js",
   "/assets/RiskMap-vh-t_kPv.css",
-  "/assets/alerts-Bl3SA7qq.js",
-  "/assets/alerts-pH9ozTMA.js",
+  "/assets/alerts-CHOLxHZU.js",
+  "/assets/alerts-c-492J15.js",
   "/assets/atkinson-hyperlegible-latin-400-normal-BbWidj28.woff",
   "/assets/atkinson-hyperlegible-latin-400-normal-BrHNak5F.woff2",
   "/assets/atkinson-hyperlegible-latin-ext-400-normal-Bbz-b3yf.woff",
@@ -32,21 +32,21 @@ const PRECACHE_ASSETS = [
   "/assets/client-D2HHhMwr.js",
   "/assets/dist-Dhrj-3P3.js",
   "/assets/geo-translations-Df2VNEtI.js",
-  "/assets/index-m971bU7U.js",
+  "/assets/index-E_2n4scq.js",
   "/assets/lock-DRCxS8gL.js",
-  "/assets/monitoring.functions-BjZjPd3h.js",
+  "/assets/offline-manager-CIV_L1An.js",
   "/assets/offline-media-store-BuzdrYhz.js",
   "/assets/queryOptions-BIFxg3nk.js",
   "/assets/risk-CkQ7Hukn.js",
   "/assets/rolldown-runtime-hePW80VL.js",
   "/assets/route-CDY9Qrxi.js",
-  "/assets/routes-Bm43wtxE.js",
-  "/assets/routes-pH9ozTMA.js",
+  "/assets/routes-B7S0KuFc.js",
+  "/assets/routes-c-492J15.js",
   "/assets/styles-B0Fnc7_s.css",
-  "/assets/useNavigate-h92FaX53.js",
+  "/assets/useNavigate-DMUZAVLd.js",
   "/assets/web-dZP68vr3.js",
-  "/assets/zones._id-CFVkEEDQ.js",
-  "/assets/zones._id-pH9ozTMA.js",
+  "/assets/zones._id-4iAhdOpJ.js",
+  "/assets/zones._id-c-492J15.js",
   "/emblem-of-india.svg",
   "/favicon.ico",
   "/favicon.svg",

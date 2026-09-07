@@ -583,3 +583,54 @@ export function useOfflineQueue() {
     triggerSync,
   };
 }
+
+import { getAllZones } from "./geography";
+
+/**
+ * Returns offline overview data from cached package or authoritative 15 monitored hill zones
+ * to prevent route loader crashes when operating without internet connectivity.
+ */
+export function getOfflineOverviewFallback() {
+  const cachedStatus = getCachedOfflinePackage();
+  if (cachedStatus?.package?.zones && cachedStatus.package.zones.length > 0) {
+    return {
+      zones: cachedStatus.package.zones,
+      roads: cachedStatus.package.roads || [],
+      alerts: [],
+      activeModel: cachedStatus.package.active_model || null,
+      candidateModel: null,
+      observations: [],
+    };
+  }
+
+  // Fallback to the authoritative 15 monitored hill zones
+  const fallbackZones = getAllZones().map((z) => ({
+    id: z.id,
+    zone_name: z.name,
+    state: z.state,
+    district: z.district,
+    risk_score: 0,
+    current_risk_level: "UNKNOWN" as const,
+    antecedent_rainfall_mm: null,
+    intensity_rainfall_mm: null,
+    soil_moisture_pct: null,
+    dominant_slope_deg: 25,
+    critical_facilities_count: 0,
+    population_density: 0,
+    last_updated_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    created_at: new Date().toISOString(),
+    explanation: "Offline View: Live server risk telemetry unavailable. Field reporting active.",
+    scientific_limitation: "OFFLINE_CACHED_VIEW",
+  }));
+
+  return {
+    zones: fallbackZones,
+    roads: [],
+    alerts: [],
+    activeModel: null,
+    candidateModel: null,
+    observations: [],
+  };
+}
+

@@ -540,42 +540,66 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
 
     try {
       const fullRecord = queueObservation(record);
+      const isEffectiveOffline =
+        (typeof navigator !== "undefined" && !navigator.onLine) ||
+        !isOnline ||
+        connectivityState === "api_unavailable";
 
-      if (!isOnline || connectivityState === "api_unavailable") {
+      if (isEffectiveOffline) {
         setStatusMessage({
           type: "offline",
-          text: t("field_observation.offline_queued", "Device offline/API unavailable. Observation preserved in local offline queue; will sync automatically upon reconnection."),
+          text: t("field_observation.offline_queued", "Device offline. Observation preserved in local queue ({{id}}); will sync automatically upon reconnection.", {
+            id: fullRecord.idempotency_key?.slice(0, 12),
+          }),
         });
         setTimeout(() => {
           setOpen(false);
           setStatusMessage(null);
           onSuccess?.();
-        }, 2200);
+        }, 1800);
       } else {
-        const res = await submitFieldObservationsServerFn({
-          data: { observations: [fullRecord] },
-        });
+        try {
+          const res = await submitFieldObservationsServerFn({
+            data: { observations: [fullRecord] },
+          });
 
-        if (res.success && res.syncedCount > 0) {
-          pruneQueue([fullRecord.idempotency_key].filter((k): k is string => k !== undefined));
-          const trustNotice =
-            userRole === "PUBLIC_USER"
-              ? t("field_observation.trust_notice_citizen", "Submitted for official review (unverified citizen signal).")
-              : t("field_observation.trust_notice_official", "Submitted with official authority credentials.");
+          if (res.success && res.syncedCount > 0) {
+            pruneQueue([fullRecord.idempotency_key].filter((k): k is string => k !== undefined));
+            const trustNotice =
+              userRole === "PUBLIC_USER"
+                ? t("field_observation.trust_notice_citizen", "Submitted for official review (unverified citizen signal).")
+                : t("field_observation.trust_notice_official", "Submitted with official authority credentials.");
+            setStatusMessage({
+              type: "success",
+              text: t("field_observation.success_notice", "Observation for Zone {{zoneId}} submitted. {{trustNotice}}", { zoneId, trustNotice }),
+            });
+            setTimeout(() => {
+              setOpen(false);
+              setStatusMessage(null);
+              onSuccess?.();
+            }, 1800);
+          } else {
+            setStatusMessage({
+              type: "offline",
+              text: t("field_observation.offline_queued", "Server sync pending; observation preserved in local offline queue."),
+            });
+            setTimeout(() => {
+              setOpen(false);
+              setStatusMessage(null);
+              onSuccess?.();
+            }, 1800);
+          }
+        } catch (netErr) {
+          console.warn("[FieldObservationDialog] Network sync attempt failed, preserved offline:", netErr);
           setStatusMessage({
-            type: "success",
-            text: t("field_observation.success_notice", "Observation for Zone {{zoneId}} submitted. {{trustNotice}}", { zoneId, trustNotice }),
+            type: "offline",
+            text: t("field_observation.network_error", "Network offline. Observation safely preserved in offline queue; will sync upon reconnection."),
           });
           setTimeout(() => {
             setOpen(false);
             setStatusMessage(null);
             onSuccess?.();
           }, 1800);
-        } else {
-          setStatusMessage({
-            type: "error",
-            text: res.errors?.[0] || "Server sync failed; observation preserved in offline queue.",
-          });
         }
       }
     } catch (err) {
@@ -584,6 +608,11 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
         type: "offline",
         text: t("field_observation.network_error", "Network error encountered. Observation preserved in offline queue."),
       });
+      setTimeout(() => {
+        setOpen(false);
+        setStatusMessage(null);
+        onSuccess?.();
+      }, 1800);
     } finally {
       setSubmitting(false);
     }
