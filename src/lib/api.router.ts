@@ -74,6 +74,11 @@ import {
   evaluateCellRisk,
   deriveLocationSpatialRisk,
 } from "./spatial-risk.service";
+import {
+  getActiveLocalsAlerts,
+  evaluateObservationsForLocalsEscalation,
+  resolveLocalsAlert,
+} from "./locals-escalation.service";
 
 const DEV_ORIGINS = ["http://localhost:3000", "http://localhost:5173", "http://localhost:8080"];
 
@@ -677,6 +682,144 @@ export async function handleApiRequest(request: Request): Promise<Response | nul
         200,
         cors,
       );
+    }
+
+    // 6e. LOCALS GPS-proximity and zone-fallback escalation endpoints
+    if (pathname === "/api/locals/active" && request.method === "GET") {
+      const alerts = await getActiveLocalsAlerts();
+      return jsonResponse({ ok: true, alerts }, 200, cors);
+    }
+
+    if (pathname === "/api/locals/check" && request.method === "POST") {
+      // Cron-callable or admin authenticated
+      const authHeader = request.headers.get("Authorization");
+      let isAllowed = false;
+
+      if (authHeader) {
+        const { authenticateToken: authToken } = await import("./official-auth.service");
+        const profile = await authToken(authHeader);
+        if (profile && (profile.role === "VERIFIED_OFFICIAL" || profile.role === "DISPATCHER" || profile.role === "ADMIN")) {
+          isAllowed = true;
+        }
+      }
+
+      if (!isAllowed) {
+        const cronErr = await authenticateCronRequest(request);
+        if (!cronErr) {
+          isAllowed = true;
+        }
+      }
+
+      if (!isAllowed) {
+        return errorResponse("Unauthorized to trigger LOCALS evaluation check", "UNAUTHORIZED", 401, cors);
+      }
+
+      // Fetch pending observations from the last 2 hours
+      let recentPending: any[] = [];
+      try {
+        const twoHoursAgo = new Date(Date.now() - 2 * 3600000).toISOString();
+        const { data } = await supabaseAdmin
+          .from("field_observations")
+          .select("*")
+          .or("status.eq.PENDING_VERIFICATION,status.eq.SUBMITTED")
+          .gte("observed_at", twoHoursAgo)
+          .order("observed_at", { ascending: false });
+        if (data) recentPending = data;
+      } catch (err: any) {
+        console.warn("[LOCALS Check query]", err?.message || err);
+      }
+
+      const created = await evaluateObservationsForLocalsEscalation(recentPending, []);
+      return jsonResponse({ ok: true, created_count: created.length, created_alerts: created }, 200, cors);
+    }
+
+    const localsResolveMatch = pathname.match(/^\/api\/locals\/([^/]+)\/resolve$/);
+    if (localsResolveMatch && request.method === "POST") {
+      const alertId = localsResolveMatch[1];
+      const authHeader = request.headers.get("Authorization");
+      if (!authHeader) {
+        return errorResponse("Authentication required to resolve LOCALS alert", "UNAUTHORIZED", 401, cors);
+      }
+
+      let actor = { id: "system", email: "system@landalert.org", role: "ADMIN" };
+      let isAuthorized = false;
+
+      const { authenticateToken: authToken } = await import("./official-auth.service");
+      const profile = await authToken(authHeader);
+      if (profile) {
+        actor = { id: profile.id, email: profile.email, role: profile.role };
+        isAuthorized =
+          profile.role === "VERIFIED_OFFICIAL" ||
+          profile.role === "DISPATCHER" ||
+          profile.role === "ADMIN";
+      } else {
+        const cronErr = await authenticateCronRequest(request);
+        if (!cronErr) {
+          isAuthorized = true;
+          actor = { id: "system-cron", email: "cron@landalert.org", role: "ADMIN" };
+        }
+      }
+
+      if (!isAuthorized) {
+        return errorResponse(
+          "Forbidden: Only VERIFIED_OFFICIAL, DISPATCHER, or ADMIN may resolve LOCALS alerts",
+          "FORBIDDEN",
+          403,
+          cors,
+        );
+      }
+
+      let body: {
+        resolution?: unknown;
+        note?: unknown;
+        dispatch_alert?: unknown;
+        zone_id?: unknown;
+        justification?: unknown;
+      } = {};
+      try {
+        body = await request.json();
+      } catch {
+        return errorResponse("Malformed JSON request body", "INVALID_JSON", 400, cors);
+      }
+
+      const resolution = body.resolution as string;
+      if (resolution !== "CONFIRMED_HAZARD" && resolution !== "FALSE_PATTERN") {
+        return errorResponse(
+          "resolution must be 'CONFIRMED_HAZARD' or 'FALSE_PATTERN'",
+          "INVALID_RESOLUTION",
+          400,
+          cors,
+        );
+      }
+
+      const note = typeof body.note === "string" ? body.note.trim() : "";
+      if (note.length < 5) {
+        return errorResponse(
+          "A resolution note of at least 5 characters is required",
+          "MISSING_NOTE",
+          400,
+          cors,
+        );
+      }
+
+      let dispatchResult: any = null;
+      if (resolution === "CONFIRMED_HAZARD" && body.dispatch_alert && body.zone_id) {
+        try {
+          dispatchResult = await evaluateAndDispatchAlert(Number(body.zone_id), {
+            channel: "both",
+            justification: typeof body.justification === "string" ? body.justification : note,
+          });
+        } catch (err: any) {
+          console.warn("[LOCALS Escalation Dispatch Warning]", err?.message || err);
+        }
+      }
+
+      const resolveRes = await resolveLocalsAlert(alertId, resolution as any, note, actor);
+      if (!resolveRes.success) {
+        return errorResponse(resolveRes.error || "Resolution failed", "RESOLUTION_FAILED", 400, cors);
+      }
+
+      return jsonResponse({ ok: true, alert: resolveRes.alert, dispatchResult }, 200, cors);
     }
 
     // 7. Offline Field Observation Synchronization

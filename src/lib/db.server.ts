@@ -106,6 +106,7 @@ export async function ensureFieldObservationsSchema(): Promise<boolean> {
       "ALTER TABLE public.field_observations ADD COLUMN IF NOT EXISTS verification_notes TEXT;",
       "ALTER TABLE public.field_observations ADD COLUMN IF NOT EXISTS evidence_summary JSONB DEFAULT '{}'::jsonb;",
       "ALTER TABLE public.field_observations ADD COLUMN IF NOT EXISTS actionable_dispatch_id BIGINT;",
+      "ALTER TABLE public.field_observations ADD COLUMN IF NOT EXISTS report_type TEXT;",
     ];
 
     for (const ddl of ddlStatements) {

@@ -27,6 +27,7 @@ import { Camera, Video, Upload } from "lucide-react";
 import { ObservationCameraModal } from "@/components/ObservationCameraModal";
 import { VoiceTranslateTextarea } from "@/components/VoiceTranslateTextarea";
 import { useUserLocation } from "@/hooks/useUserLocation";
+import { extractReportType } from "@/lib/locals-escalation.service";
 import { useTranslation } from "react-i18next";
 import { getLocalizedZoneName, getLocalizedDistrict, getLocalizedState } from "@/lib/geo-translations";
 
@@ -565,6 +566,7 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
       notes: fieldNotes.trim() || undefined,
       description: fieldNotes.trim() || undefined,
       road_status: roadStatus,
+      report_type: extractReportType({ visual_signs: visualSigns, road_status: roadStatus }),
       observer_id: observerId.trim() || "citizen_observer",
       media_urls: uploadedUrls.filter((u) => !u.startsWith("data:") && !u.startsWith("offline_")),
       media_metadata: mediaMeta,
