@@ -16,6 +16,8 @@ import {
 import { translateToEnglish } from "@/lib/translation.service";
 import { useTranslation } from "react-i18next";
 
+import { saveOfflineMedia } from "@/lib/offline-media-store";
+
 interface VoiceTranslateTextareaProps {
   id?: string;
   value: string;
@@ -24,6 +26,7 @@ interface VoiceTranslateTextareaProps {
   placeholder?: string;
   disabled?: boolean;
   maxLength?: number;
+  onAudioRecorded?: (blob: Blob, mediaId: string) => void;
 }
 
 const SUPPORTED_VOICE_LANGUAGES = [
@@ -44,9 +47,12 @@ export function VoiceTranslateTextarea({
   placeholder,
   disabled = false,
   maxLength = 1000,
+  onAudioRecorded,
 }: VoiceTranslateTextareaProps) {
   const { t, i18n } = useTranslation();
   const [isListening, setIsListening] = useState(false);
+  const [isRecordingAudio, setIsRecordingAudio] = useState(false);
+  const [audioRecordDuration, setAudioRecordDuration] = useState(0);
   const [selectedVoiceLang, setSelectedVoiceLang] = useState<string>("auto");
   const [interimSpokenText, setInterimSpokenText] = useState<string>("");
   const [isTranslating, setIsTranslating] = useState(false);
@@ -55,6 +61,12 @@ export function VoiceTranslateTextarea({
   const [speechSupported, setSpeechSupported] = useState(true);
 
   const recognitionRef = useRef<any>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioStreamRef = useRef<MediaStream | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const recordTimerRef = useRef<any>(null);
+  const recordStartTimeRef = useRef<number>(0);
+
   const isListeningRef = useRef<boolean>(false);
   const userManuallyStoppedRef = useRef<boolean>(false);
   const restartTimeoutRef = useRef<any>(null);
@@ -121,54 +133,159 @@ export function VoiceTranslateTextarea({
     [getEffectiveSpeechLang, onChange],
   );
 
+  // Start 100% Offline Audio Recording using MediaRecorder (Works with zero internet!)
+  const startOfflineAudioRecording = useCallback(async () => {
+    if (!navigator?.mediaDevices?.getUserMedia) {
+      setTranslationNotice("⚠️ Microphone recording not supported on this device.");
+      setTimeout(() => setTranslationNotice(null), 5000);
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioStreamRef.current = stream;
+      audioChunksRef.current = [];
+
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+        ? "audio/webm;codecs=opus"
+        : MediaRecorder.isTypeSupported("audio/webm")
+        ? "audio/webm"
+        : MediaRecorder.isTypeSupported("audio/mp4")
+        ? "audio/mp4"
+        : "";
+
+      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) {
+          audioChunksRef.current.push(e.data);
+        }
+      };
+
+      recorder.onstop = async () => {
+        const recordedBlob = new Blob(audioChunksRef.current, {
+          type: mimeType || "audio/webm",
+        });
+
+        // Cleanup hardware audio stream tracks
+        if (audioStreamRef.current) {
+          audioStreamRef.current.getTracks().forEach((track) => track.stop());
+          audioStreamRef.current = null;
+        }
+
+        const durationSecs = Math.max(1, Math.round((Date.now() - recordStartTimeRef.current) / 1000));
+        setIsRecordingAudio(false);
+        setIsListening(false);
+        isListeningRef.current = false;
+
+        if (recordTimerRef.current) {
+          clearInterval(recordTimerRef.current);
+          recordTimerRef.current = null;
+        }
+
+        try {
+          // Store securely in offline IndexedDB
+          const mediaId = `voice_memo_${Date.now()}`;
+          const filename = `${mediaId}.webm`;
+          await saveOfflineMedia(mediaId, recordedBlob, {
+            name: filename,
+            mimeType: recordedBlob.type || "audio/webm",
+            size: recordedBlob.size,
+          });
+
+          const current = (valueRef.current || "").trim();
+          const voiceTag = `[🎙️ Voice note (${durationSecs}s) — Stored offline]`;
+          const updated = current ? `${current} ${voiceTag}` : voiceTag;
+          valueRef.current = updated;
+          onChange(updated);
+
+          setTranslationNotice(`✓ Voice recording (${durationSecs}s) saved offline`);
+          setTimeout(() => setTranslationNotice(null), 5000);
+
+          if (onAudioRecorded) {
+            onAudioRecorded(recordedBlob, mediaId);
+          }
+        } catch (storageErr) {
+          console.warn("[VoiceTranslate] Offline audio save warning:", storageErr);
+          setTranslationNotice(`✓ Voice recording captured (${durationSecs}s)`);
+          setTimeout(() => setTranslationNotice(null), 4000);
+        }
+      };
+
+      mediaRecorderRef.current = recorder;
+      recorder.start(250); // Collect data slices every 250ms
+
+      recordStartTimeRef.current = Date.now();
+      setAudioRecordDuration(0);
+      setIsRecordingAudio(true);
+      setIsListening(true);
+      isListeningRef.current = true;
+      userManuallyStoppedRef.current = false;
+
+      recordTimerRef.current = setInterval(() => {
+        setAudioRecordDuration(Math.round((Date.now() - recordStartTimeRef.current) / 1000));
+      }, 1000);
+
+      setTranslationNotice("🎙️ Recording offline voice note — Speak clearly into mic");
+    } catch (err: any) {
+      console.warn("[VoiceTranslate] Offline MediaRecorder failed:", err);
+      setIsListening(false);
+      setIsRecordingAudio(false);
+      isListeningRef.current = false;
+      setTranslationNotice("⚠️ Microphone access denied. Please allow mic in browser settings.");
+      setTimeout(() => setTranslationNotice(null), 5000);
+    }
+  }, [onChange, onAudioRecorded]);
+
   const stopListening = useCallback(() => {
     userManuallyStoppedRef.current = true;
     isListeningRef.current = false;
+
+    // If active MediaRecorder is running, stop it
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      try {
+        mediaRecorderRef.current.stop();
+      } catch {}
+      mediaRecorderRef.current = null;
+    }
+
+    if (audioStreamRef.current) {
+      audioStreamRef.current.getTracks().forEach((track) => track.stop());
+      audioStreamRef.current = null;
+    }
+
+    if (recordTimerRef.current) {
+      clearInterval(recordTimerRef.current);
+      recordTimerRef.current = null;
+    }
+
     if (restartTimeoutRef.current) {
       clearTimeout(restartTimeoutRef.current);
       restartTimeoutRef.current = null;
     }
+
     if (recognitionRef.current) {
       try {
         recognitionRef.current.stop();
       } catch {}
       recognitionRef.current = null;
     }
+
+    setIsRecordingAudio(false);
     setIsListening(false);
     setInterimSpokenText("");
   }, []);
 
   const startListening = useCallback(async () => {
     if (typeof window === "undefined") return;
-    const SpeechRec = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRec) {
-      setSpeechSupported(false);
-      setTranslationNotice("⚠️ Speech recognition not supported in this browser. Please type and use Translate.");
-      return;
-    }
 
-    // Explicitly prompt / verify microphone permission via getUserMedia first.
-    // In Chromium and Safari, calling SpeechRecognition directly without granted permission
-    // causes the engine to immediately abort and fire onend/onerror silently.
-    if (navigator?.mediaDevices?.getUserMedia) {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        // Release the test tracks immediately so SpeechRecognition has clean exclusive hardware access
-        stream.getTracks().forEach((track) => track.stop());
-      } catch (err: any) {
-        console.warn("[VoiceTranslate] Mic permission error:", err);
-        isListeningRef.current = false;
-        setIsListening(false);
-        if (err?.name === "NotAllowedError" || err?.name === "PermissionDeniedError") {
-          setTranslationNotice("⚠️ Microphone access blocked. Please allow mic in browser address bar.");
-        } else if (err?.name === "NotFoundError" || err?.name === "DevicesNotFoundError") {
-          setTranslationNotice("⚠️ No microphone device detected.");
-        } else {
-          setTranslationNotice("⚠️ Could not access microphone: " + (err?.message || "Permission required"));
-        }
-        setTimeout(() => setTranslationNotice(null), 6000);
-        return;
-      }
+    // If device is completely offline or SpeechRecognition is missing, start local offline recording directly!
+    const isOffline = typeof navigator !== "undefined" && !navigator.onLine;
+    const SpeechRec = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+
+    if (isOffline || !SpeechRec) {
+      await startOfflineAudioRecording();
+      return;
     }
 
     try {
@@ -198,7 +315,6 @@ export function VoiceTranslateTextarea({
           const result = event.results[i];
           const transcript = result[0]?.transcript || "";
           if (result.isFinal) {
-            // Translate final chunk to English and append to text box
             handleTranslateAndAppend(transcript);
             setInterimSpokenText("");
           } else {
@@ -213,7 +329,17 @@ export function VoiceTranslateTextarea({
       recognition.onerror = (event: any) => {
         console.warn("[SpeechRecognition] error event:", event.error);
         if (event.error === "no-speech") {
-          // Simply silence or pause; do not terminate the session
+          return;
+        }
+
+        // On network failure or Google speech service blockage, seamlessly fallback to Offline Voice Recording!
+        if (event.error === "network") {
+          console.info("[VoiceTranslate] Speech recognition cloud unreachable. Switching to offline voice recording...");
+          try {
+            recognition.stop();
+          } catch {}
+          recognitionRef.current = null;
+          startOfflineAudioRecording();
           return;
         }
 
@@ -229,19 +355,11 @@ export function VoiceTranslateTextarea({
           setIsListening(false);
           setTranslationNotice("⚠️ Microphone busy or not connected.");
           setTimeout(() => setTranslationNotice(null), 6000);
-        } else if (event.error === "network") {
-          userManuallyStoppedRef.current = true;
-          isListeningRef.current = false;
-          setIsListening(false);
-          setTranslationNotice("⚠️ Speech service network error. You can type and use 🌐 Translate.");
-          setTimeout(() => setTranslationNotice(null), 6000);
         }
       };
 
       recognition.onend = () => {
-        // Web Speech API triggers onend on any pause or phrase completion.
-        // If user did NOT explicitly click stop, automatically restart after 150ms to keep listening continuously.
-        if (isListeningRef.current && !userManuallyStoppedRef.current) {
+        if (isListeningRef.current && !userManuallyStoppedRef.current && !isRecordingAudio) {
           if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
           restartTimeoutRef.current = setTimeout(() => {
             if (isListeningRef.current && !userManuallyStoppedRef.current && recognitionRef.current) {
@@ -255,9 +373,11 @@ export function VoiceTranslateTextarea({
           return;
         }
 
-        setIsListening(false);
-        isListeningRef.current = false;
-        setInterimSpokenText("");
+        if (!isRecordingAudio) {
+          setIsListening(false);
+          isListeningRef.current = false;
+          setInterimSpokenText("");
+        }
       };
 
       userManuallyStoppedRef.current = false;
@@ -265,13 +385,10 @@ export function VoiceTranslateTextarea({
       recognitionRef.current = recognition;
       recognition.start();
     } catch (err: any) {
-      console.warn("[SpeechRecognition] Start failed:", err);
-      isListeningRef.current = false;
-      setIsListening(false);
-      setTranslationNotice("⚠️ Could not start voice typing: " + (err?.message || "Unknown error"));
-      setTimeout(() => setTranslationNotice(null), 5000);
+      console.warn("[SpeechRecognition] Start failed, falling back to offline audio recording:", err);
+      await startOfflineAudioRecording();
     }
-  }, [getEffectiveSpeechLang, handleTranslateAndAppend]);
+  }, [getEffectiveSpeechLang, handleTranslateAndAppend, isRecordingAudio, startOfflineAudioRecording]);
 
   // Toggle speech recognition
   const toggleSpeechRecognition = useCallback(
@@ -448,7 +565,19 @@ export function VoiceTranslateTextarea({
       <div className="flex flex-wrap items-center justify-between gap-1 text-[0.65rem] font-mono">
         {/* Active Speech / Translation badge */}
         <div className="flex items-center gap-1.5 flex-1 min-w-0">
-          {isListening && (
+          {isRecordingAudio && (
+            <Badge
+              variant="destructive"
+              className="animate-pulse flex items-center gap-1 px-1.5 py-0.5 text-[0.62rem] bg-red-600 text-white font-mono"
+            >
+              <Mic className="h-3 w-3" />
+              <span>
+                REC {Math.floor(audioRecordDuration / 60)}:{(audioRecordDuration % 60).toString().padStart(2, "0")} (Offline)
+              </span>
+            </Badge>
+          )}
+
+          {isListening && !isRecordingAudio && (
             <Badge
               variant="destructive"
               className="animate-pulse flex items-center gap-1 px-1.5 py-0.5 text-[0.62rem]"

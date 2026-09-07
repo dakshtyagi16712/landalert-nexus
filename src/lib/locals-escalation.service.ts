@@ -33,7 +33,7 @@ export const LOCALS_OVERLAP_SUPPRESSION_THRESHOLD = 0.5;
 // Types & Enums
 // ==============================================================================
 
-export {
+import {
   type LocalsReportType,
   type LocalsDetectionMethod,
   type LocalsAlertStatus,
@@ -43,14 +43,25 @@ export {
   extractReportType,
 } from "./locals-types";
 
-import type {
-  LocalsReportType,
-  LocalsDetectionMethod,
-  LocalsAlertStatus,
-  LocalsResolutionAction,
-  LocalsObservationLike,
-  LocalsAlertRecord,
-} from "./locals-types";
+export {
+  type LocalsReportType,
+  type LocalsDetectionMethod,
+  type LocalsAlertStatus,
+  type LocalsResolutionAction,
+  type LocalsObservationLike,
+  type LocalsAlertRecord,
+  extractReportType,
+};
+
+export type PendingObservationRow = LocalsObservationLike;
+
+export const LOCALS_CONSTANTS = {
+  CLUSTER_THRESHOLD: LOCALS_CLUSTER_THRESHOLD,
+  WINDOW_HOURS: LOCALS_WINDOW_HOURS,
+  WINDOW_MS: LOCALS_WINDOW_MS,
+  RADIUS_METERS: LOCALS_RADIUS_METERS,
+  OVERLAP_SUPPRESSION_THRESHOLD: LOCALS_OVERLAP_SUPPRESSION_THRESHOLD,
+};
 
 // In-memory alert store for testing and offline fallback
 const IN_MEMORY_LOCALS_ALERTS: LocalsAlertRecord[] = [];
@@ -283,7 +294,7 @@ export async function createLocalsAlertRecord(
 ): Promise<LocalsAlertRecord | null> {
   if (cluster.length < LOCALS_CLUSTER_THRESHOLD) return null;
 
-  const reportType = extractReportType(cluster[0]);
+  const reportType = extractReportType(cluster[0] ?? {});
   const triggeringIds = cluster.map((o) => parseObsId(o.id));
   const zoneIdsSet = new Set<number>();
   cluster.forEach((o) => {
@@ -309,7 +320,7 @@ export async function createLocalsAlertRecord(
   const sortedTimes = cluster
     .map((o) => getObsTime(o))
     .sort((a, b) => a - b);
-  const firstObservedAt = new Date(sortedTimes[0]).toISOString();
+  const firstObservedAt = new Date(sortedTimes[0] ?? Date.now()).toISOString();
   const triggeredAt = new Date().toISOString();
 
   const newAlert: LocalsAlertRecord = {

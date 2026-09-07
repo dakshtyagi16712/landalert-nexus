@@ -138,6 +138,7 @@ export async function syncFieldObservations(records: FieldObservationInput[]): P
     soil_condition: string | null;
     visual_signs: string | null;
     notes?: string | null;
+    report_type?: string | null;
     road_status: "open" | "restricted" | "blocked" | "unknown" | null;
     observer_id: string;
     idempotency_key: string;
@@ -225,9 +226,9 @@ export async function syncFieldObservations(records: FieldObservationInput[]): P
     const source = isOfficial ? "OFFICIAL_SURVEY" : "PUBLIC_REPORT";
 
     const reportType = r.report_type ?? extractReportType({
-      report_type: r.report_type,
-      visual_signs: r.visual_signs,
-      road_status: r.road_status,
+      report_type: r.report_type ?? null,
+      visual_signs: r.visual_signs ?? null,
+      road_status: r.road_status ?? null,
     });
 
     validRows.push({

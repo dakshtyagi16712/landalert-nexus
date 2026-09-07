@@ -805,16 +805,33 @@ export async function handleApiRequest(request: Request): Promise<Response | nul
       let dispatchResult: any = null;
       if (resolution === "CONFIRMED_HAZARD" && body.dispatch_alert && body.zone_id) {
         try {
-          dispatchResult = await evaluateAndDispatchAlert(Number(body.zone_id), {
-            channel: "both",
-            justification: typeof body.justification === "string" ? body.justification : note,
-          });
+          dispatchResult = await evaluateAndDispatchAlert(
+            {
+              status: "VALID",
+              zone_id: Number(body.zone_id),
+              zone_name: String(body.zone_id),
+              district: "",
+              state: "",
+              model_version: "locals_escalation_v1",
+              feature_schema_version: "1",
+              probability: 0.85,
+              risk_score: 0.85,
+              risk_level: "High",
+              explanation_narrative: typeof body.justification === "string" ? body.justification : note,
+              data_freshness: { soil_moisture_status: "missing" },
+              inference_timestamp: new Date().toISOString(),
+            },
+            {
+              channel: "both",
+              justification: typeof body.justification === "string" ? body.justification : note,
+            },
+          );
         } catch (err: any) {
           console.warn("[LOCALS Escalation Dispatch Warning]", err?.message || err);
         }
       }
 
-      const resolveRes = await resolveLocalsAlert(alertId, resolution as any, note, actor);
+      const resolveRes = await resolveLocalsAlert(alertId ?? "", resolution as any, note, actor);
       if (!resolveRes.success) {
         return errorResponse(resolveRes.error || "Resolution failed", "RESOLUTION_FAILED", 400, cors);
       }
