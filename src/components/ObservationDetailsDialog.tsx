@@ -73,22 +73,21 @@ function AutoResolvingMediaItem({
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (item.url) {
-      setLocalBlobUrl(item.url);
-      return;
-    }
+    let isMounted = true;
     const resolved =
       resolvedOfflineUrls[item.key] ||
       (item.name ? resolvedOfflineUrls[item.name] : undefined);
     if (resolved) {
       setLocalBlobUrl(resolved);
-      return;
+      return () => {
+        isMounted = false;
+      };
     }
 
-    let isMounted = true;
-    setLoading(true);
     const targetKey = item.key || item.name;
-    if (targetKey) {
+
+    if (targetKey && (item.isOffline || item.key.startsWith("offline_") || !item.url)) {
+      setLoading(true);
       (async () => {
         try {
           const stored =
@@ -98,18 +97,25 @@ function AutoResolvingMediaItem({
             const u = URL.createObjectURL(stored.blob);
             setLocalBlobUrl(u);
             onResolve(targetKey, u);
+            return;
           }
         } catch {
           // ignore
         } finally {
           if (isMounted) setLoading(false);
         }
+        if (item.url && isMounted) {
+          setLocalBlobUrl(item.url);
+        }
       })();
+    } else if (item.url) {
+      setLocalBlobUrl(item.url);
     }
+
     return () => {
       isMounted = false;
     };
-  }, [item.url, item.key, item.name, resolvedOfflineUrls]);
+  }, [item.url, item.key, item.name, item.isOffline, resolvedOfflineUrls]);
 
   const isAudio =
     item.mimeType?.startsWith("audio/") ||
@@ -646,13 +652,11 @@ export function ObservationDetailsDialog({
                     (m.name ? resolvedOfflineUrls[m.name] : undefined);
 
                   const itemUrl =
-                    m.url ||
                     resolvedUrl ||
+                    m.url ||
                     (m.storagePath
                       ? `https://shkpwbqcbeqlybdrhczq.supabase.co/storage/v1/object/public/field-observation-media/${m.storagePath}`
-                      : (m.name && !m.name.startsWith("offline_") && /\.(jpe?g|png|webp|heic)$/i.test(m.name)
-                          ? `https://shkpwbqcbeqlybdrhczq.supabase.co/storage/v1/object/public/field-observation-media/observations/${m.name}`
-                          : undefined));
+                      : undefined);
 
                   // Avoid duplicate if already represented in items
                   if (itemUrl && items.some((it) => it.url === itemUrl)) return;

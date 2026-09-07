@@ -1333,9 +1333,7 @@ function ZonePage() {
                         m.url ||
                         (m.storagePath
                           ? `https://shkpwbqcbeqlybdrhczq.supabase.co/storage/v1/object/public/field-observation-media/${m.storagePath}`
-                          : (m.name && !m.name.startsWith("offline_") && /\.(jpe?g|png|webp|heic)$/i.test(m.name)
-                              ? `https://shkpwbqcbeqlybdrhczq.supabase.co/storage/v1/object/public/field-observation-media/observations/${m.name}`
-                              : undefined));
+                          : undefined);
                       if (u && !urls.includes(u)) {
                         urls.push(u);
                       }
