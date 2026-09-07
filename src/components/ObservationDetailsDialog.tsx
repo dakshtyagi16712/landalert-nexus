@@ -23,6 +23,7 @@ import {
   ArrowLeft,
   Image as ImageIcon,
   Video as VideoIcon,
+  Trash2,
 } from "lucide-react";
 import { FieldObservationDialog } from "./FieldObservationDialog";
 import {
@@ -70,7 +71,7 @@ export function ObservationDetailsDialog({
   const [resolvedOfflineUrls, setResolvedOfflineUrls] = useState<Record<string, string>>({});
 
   // Review action state
-  const [reviewAction, setReviewAction] = useState<"approve" | "reject" | null>(null);
+  const [reviewAction, setReviewAction] = useState<"approve" | "reject" | "delete" | null>(null);
   const [reviewNotes, setReviewNotes] = useState("");
   const [reviewBusy, setReviewBusy] = useState(false);
   const [reviewNotice, setReviewNotice] = useState<{ type: "success" | "error"; msg: string } | null>(null);
@@ -199,6 +200,47 @@ export function ObservationDetailsDialog({
         setReviewNotes("");
         // Propagate cache invalidation to parent
         onSuccess?.();
+      }
+    } catch (err) {
+      setReviewNotice({ type: "error", msg: err instanceof Error ? err.message : "Network error." });
+    } finally {
+      setReviewBusy(false);
+    }
+  }
+
+  async function handleDelete(obsId: number | string) {
+    if (!accessToken) {
+      setReviewNotice({ type: "error", msg: "You are not signed in. Please sign in to delete observations." });
+      return;
+    }
+    setReviewBusy(true);
+    setReviewNotice(null);
+    try {
+      const res = await fetch("/api/observations/delete", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          observation_id: obsId,
+          reason: reviewNotes.trim() || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setReviewNotice({ type: "error", msg: data?.error ?? `Deletion failed (${res.status})` });
+      } else {
+        setReviewNotice({
+          type: "success",
+          msg: "Observation permanently deleted.",
+        });
+        setReviewAction(null);
+        setReviewNotes("");
+        onSuccess?.();
+        setTimeout(() => {
+          setActiveObsId(null);
+        }, 1000);
       }
     } catch (err) {
       setReviewNotice({ type: "error", msg: err instanceof Error ? err.message : "Network error." });
@@ -534,6 +576,16 @@ export function ObservationDetailsDialog({
                       <XCircle className="h-3.5 w-3.5" />
                       {t("observations.reject_btn", "Reject")}
                     </button>
+                    <button
+                      id="obs-delete-btn"
+                      type="button"
+                      disabled={reviewBusy}
+                      onClick={() => { setReviewAction("delete"); setReviewNotes(""); setReviewNotice(null); }}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold transition-colors disabled:opacity-50 ml-auto"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      {t("observations.delete_btn", "Delete Observation")}
+                    </button>
                   </div>
                 )}
 
@@ -611,6 +663,51 @@ export function ObservationDetailsDialog({
                         {t("observations.reject_reason_min", "Reason must be at least 5 characters.")}
                       </p>
                     )}
+                  </div>
+                )}
+
+                {/* Delete panel — official permanent deletion confirmation */}
+                {reviewAction === "delete" && (
+                  <div className="space-y-3 rounded border border-rose-500/30 bg-rose-500/10 p-3">
+                    <div className="flex items-center gap-2 text-xs font-semibold text-rose-400">
+                      <Trash2 className="h-4 w-4 shrink-0" />
+                      <span>{t("observations.delete_confirm_title", "Permanently Delete Observation")} #{activeObs.id}?</span>
+                    </div>
+                    <p className="text-[0.7rem] text-muted-foreground">
+                      {t("observations.delete_confirm_desc", "This action will permanently remove this field observation from official records and audit logs. This cannot be undone.")}
+                    </p>
+                    <div className="space-y-1.5">
+                      <label className="text-[0.68rem] text-muted-foreground uppercase font-semibold">
+                        {t("observations.delete_reason_label", "Deletion Reason (Optional)")}
+                      </label>
+                      <input
+                        id="obs-delete-reason"
+                        type="text"
+                        value={reviewNotes}
+                        onChange={(e) => setReviewNotes(e.target.value)}
+                        placeholder={t("observations.delete_reason_placeholder", "e.g. Duplicate report, invalid coordinates, or spam entry")}
+                        className="w-full rounded border border-border bg-background px-2.5 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-rose-500"
+                      />
+                    </div>
+                    <div className="flex items-center gap-2 pt-1">
+                      <button
+                        id="obs-confirm-delete-btn"
+                        type="button"
+                        disabled={reviewBusy}
+                        onClick={() => handleDelete(activeObs.id)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold transition-colors disabled:opacity-50"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        {reviewBusy ? t("common.deleting", "Deleting…") : t("observations.confirm_delete", "Confirm Delete")}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setReviewAction(null); setReviewNotes(""); setReviewNotice(null); }}
+                        className="text-xs text-muted-foreground hover:text-foreground"
+                      >
+                        {t("common.cancel", "Cancel")}
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
@@ -763,13 +860,31 @@ export function ObservationDetailsDialog({
                           </span>
                         </td>
                         <td className="py-2.5 px-3 text-right">
-                          <button
-                            type="button"
-                            onClick={() => setActiveObsId(obs.id)}
-                            className="text-xs text-primary font-bold hover:underline"
-                          >
-                            {t("observations.see_details", "See Details →")}
-                          </button>
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setActiveObsId(obs.id)}
+                              className="text-xs text-primary font-bold hover:underline"
+                            >
+                              {t("observations.see_details", "See Details →")}
+                            </button>
+                            {canReview && (
+                              <button
+                                type="button"
+                                title="Delete observation"
+                                aria-label={`Delete observation ${obs.id}`}
+                                onClick={() => {
+                                  setActiveObsId(obs.id);
+                                  setReviewAction("delete");
+                                  setReviewNotes("");
+                                  setReviewNotice(null);
+                                }}
+                                className="p-1 rounded text-muted-foreground hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     );

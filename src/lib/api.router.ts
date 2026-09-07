@@ -545,6 +545,87 @@ export async function handleApiRequest(request: Request): Promise<Response | nul
       );
     }
 
+    // 6d. Observation Deletion — Officials Only (VERIFIED_OFFICIAL, DISPATCHER, or ADMIN)
+    if (
+      (pathname === "/api/observations/delete" && request.method === "POST") ||
+      (pathname.startsWith("/api/observations/") && request.method === "DELETE") ||
+      (pathname === "/api/observations" && request.method === "DELETE")
+    ) {
+      // Require authentication
+      const authHeader = request.headers.get("Authorization");
+      if (!authHeader) {
+        return errorResponse(
+          "Authentication required to delete observations",
+          "UNAUTHORIZED",
+          401,
+          cors,
+        );
+      }
+
+      const { authenticateToken: authToken, deleteGroundObservation } = await import("./official-auth.service");
+      const profile = await authToken(authHeader);
+
+      const isAuthorized =
+        profile !== null &&
+        (profile.role === "VERIFIED_OFFICIAL" ||
+          profile.role === "DISPATCHER" ||
+          profile.role === "ADMIN");
+
+      if (!isAuthorized) {
+        return errorResponse(
+          "Forbidden: Only verified government officials, dispatchers, or administrators can delete observations",
+          "FORBIDDEN",
+          403,
+          cors,
+        );
+      }
+
+      let observationId: string | number | undefined;
+      let reason: string | undefined;
+
+      if (request.method === "DELETE" && pathname.startsWith("/api/observations/") && pathname !== "/api/observations/delete") {
+        observationId = pathname.replace("/api/observations/", "").trim();
+      } else {
+        try {
+          const body = await request.json();
+          observationId = body.observation_id || body.id;
+          reason = body.reason;
+        } catch {
+          const url = new URL(request.url);
+          observationId = url.searchParams.get("id") || undefined;
+          reason = url.searchParams.get("reason") || undefined;
+        }
+      }
+
+      if (!observationId) {
+        return errorResponse("observation_id is required", "MISSING_OBSERVATION_ID", 400, cors);
+      }
+
+      const result = await deleteGroundObservation(
+        profile!,
+        String(observationId),
+        reason || "Deleted by authorized official",
+      );
+
+      if (!result.success) {
+        if (result.error?.includes("not found")) {
+          return errorResponse(result.error, "NOT_FOUND", 404, cors);
+        }
+        return errorResponse(result.error ?? "Deletion failed", "DELETE_FAILED", 400, cors);
+      }
+
+      return jsonResponse(
+        {
+          ok: true,
+          observation_id: String(observationId),
+          deleted_by: profile!.id,
+          deleted_at: new Date().toISOString(),
+        },
+        200,
+        cors,
+      );
+    }
+
     // 7. Offline Field Observation Synchronization
 
     if (pathname === "/api/sync/observations" && request.method === "POST") {
