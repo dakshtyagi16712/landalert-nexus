@@ -124,7 +124,6 @@ export async function saveOfflineMedia(
         memoryMediaMap.set(id, record);
         resolve();
       };
-      tx.oncomplete = () => db.close();
       tx.onerror = () => {
         memoryMediaMap.set(id, record);
         resolve();
@@ -159,7 +158,6 @@ export async function getOfflineMedia(id: string): Promise<StoredOfflineMedia | 
       req.onerror = () => {
         resolve(null);
       };
-      tx.oncomplete = () => db.close();
     } catch {
       resolve(null);
     }
@@ -196,7 +194,6 @@ export async function getOfflineMediaByName(name: string): Promise<StoredOffline
         }
       };
       req.onerror = () => resolve(null);
-      tx.oncomplete = () => db.close();
     } catch {
       resolve(null);
     }
@@ -220,7 +217,6 @@ export async function deleteOfflineMedia(id: string): Promise<void> {
 
       req.onsuccess = () => resolve();
       req.onerror = () => resolve();
-      tx.oncomplete = () => db.close();
     } catch {
       resolve();
     }

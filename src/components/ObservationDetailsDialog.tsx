@@ -495,18 +495,14 @@ export function ObservationDetailsDialog({
                     (m.id ? resolvedOfflineUrls[m.id] : undefined) ||
                     (m.name ? resolvedOfflineUrls[m.name] : undefined);
 
-                  // Construct public Supabase storage fallback URL if available
-                  const publicStorageFallback =
+                  // Only use real uploaded URL, resolved IndexedDB blob, or verified storagePath
+                  const itemUrl =
                     m.url ||
                     resolvedUrl ||
                     (m.storagePath
                       ? `https://shkpwbqcbeqlybdrhczq.supabase.co/storage/v1/object/public/field-observation-media/${m.storagePath}`
-                      : undefined) ||
-                    (m.name && !m.name.startsWith("offline_")
-                      ? `https://shkpwbqcbeqlybdrhczq.supabase.co/storage/v1/object/public/field-observation-media/observations/${m.name}`
                       : undefined);
 
-                  const itemUrl = publicStorageFallback;
                   // Avoid duplicate if already represented in items
                   if (itemUrl && items.some((it) => it.url === itemUrl)) return;
                   items.push({
