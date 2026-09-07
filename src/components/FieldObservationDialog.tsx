@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import {
   Dialog,
   DialogContent,
@@ -23,7 +23,8 @@ import { submitFieldObservationsServerFn } from "@/lib/monitoring.functions";
 import type { FieldObservationInput } from "@/lib/sync.service";
 import { supabase } from "@/integrations/supabase/client";
 import { getUserAuthorizationState } from "@/lib/auth-domains";
-import { Camera as CapCamera, CameraResultType, CameraSource } from "@capacitor/camera";
+import { Camera, Video, Upload } from "lucide-react";
+import { ObservationCameraModal } from "@/components/ObservationCameraModal";
 import { useUserLocation } from "@/hooks/useUserLocation";
 import { useTranslation } from "react-i18next";
 import { getLocalizedZoneName, getLocalizedDistrict, getLocalizedState } from "@/lib/geo-translations";
@@ -243,69 +244,82 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
     }
   };
 
-  // Native Camera capture helper
-  async function handleNativeCameraCapture() {
+  // 4. Media Upload (Photo/Video) & Camera System
+  const [mediaList, setMediaList] = useState<MediaItem[]>([]);
+  const [fileError, setFileError] = useState<string | null>(null);
+  const [cameraModalOpen, setCameraModalOpen] = useState(false);
+  const [cameraModalMode, setCameraModalMode] = useState<"photo" | "video">("photo");
+  const directPhotoInputRef = useRef<HTMLInputElement | null>(null);
+  const directVideoInputRef = useRef<HTMLInputElement | null>(null);
+
+  const processCapturedFile = async (file: File) => {
     if (mediaList.length >= 3) {
       setFileError(t("field_observation.error_max_files", "Maximum 3 files allowed per observation"));
       return;
     }
     setFileError(null);
-    try {
-      const image = await CapCamera.getPhoto({
-        quality: 85,
-        allowEditing: false,
-        resultType: CameraResultType.Base64,
-        source: CameraSource.Prompt,
-      });
 
-      if (!image.base64String) return;
+    const isImg = file.type.startsWith("image/") || /\.(jpe?g|png|webp|heic)$/i.test(file.name);
+    const isVid = file.type.startsWith("video/") || /\.(mp4|webm|mov)$/i.test(file.name);
 
-      const mimeType = image.format ? `image/${image.format}` : "image/jpeg";
-      const base64Data = `data:${mimeType};base64,${image.base64String}`;
+    if (!isImg && !isVid) {
+      setFileError(
+        t(
+          "field_observation.error_format",
+          `Unsupported format: ${file.name}. Allowed: JPG, PNG, WEBP, MP4, MOV, WEBM.`
+        )
+      );
+      return;
+    }
+    if (isImg && file.size > 10 * 1024 * 1024) {
+      setFileError(t("field_observation.error_photo_size", `Image ${file.name} exceeds 10MB limit.`));
+      return;
+    }
+    if (isVid && file.size > 50 * 1024 * 1024) {
+      setFileError(t("field_observation.error_video_size", `Video ${file.name} exceeds 50MB limit.`));
+      return;
+    }
 
-      // Calculate approximate size in bytes from base64 string
-      const sizeInBytes = Math.round((image.base64String.length * 3) / 4);
-      if (sizeInBytes > 10 * 1024 * 1024) {
-        setFileError(t("field_observation.error_photo_size", "Captured photo exceeds 10MB limit."));
-        return;
-      }
-
-      // Create a File object for consistent upload pipeline
-      const byteCharacters = atob(image.base64String);
-      const byteNumbers = new Array(byteCharacters.length);
-      for (let i = 0; i < byteCharacters.length; i++) {
-        byteNumbers[i] = byteCharacters.charCodeAt(i);
-      }
-      const byteArray = new Uint8Array(byteNumbers);
-      const blob = new Blob([byteArray], { type: mimeType });
-      const filename = `camera_${Date.now()}.${image.format ?? "jpg"}`;
-      const file = new File([blob], filename, { type: mimeType });
-
-      setMediaList((prev) => [
-        ...prev,
-        {
-          file,
-          previewUrl: base64Data,
-          name: filename,
-          size: sizeInBytes,
-          mimeType,
-          base64Data,
-        },
-      ]);
-
-      if (!geoLat) {
-        captureGps();
-      }
-    } catch (err: any) {
-      if (err?.message !== "User cancelled photos app") {
-        setFileError(`Camera error: ${err?.message ?? "Capture failed"}`);
+    let base64Data = "";
+    if (isImg && file.size <= 2 * 1024 * 1024) {
+      try {
+        base64Data = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve((reader.result as string) || "");
+          reader.onerror = () => resolve("");
+          reader.readAsDataURL(file);
+        });
+      } catch {
+        base64Data = "";
       }
     }
-  }
 
-  // 4. Media Upload (Photo/Video)
-  const [mediaList, setMediaList] = useState<MediaItem[]>([]);
-  const [fileError, setFileError] = useState<string | null>(null);
+    setMediaList((prev) => [
+      ...prev,
+      {
+        file,
+        previewUrl: URL.createObjectURL(file),
+        name: file.name,
+        size: file.size,
+        mimeType: file.type || (isImg ? "image/jpeg" : "video/mp4"),
+        base64Data,
+      },
+    ]);
+
+    if (!geoLat) {
+      captureGps();
+    }
+  };
+
+  const openCamera = (mode: "photo" | "video") => {
+    if (mediaList.length >= 3) {
+      setFileError(t("field_observation.error_max_files", "Maximum 3 files allowed per observation"));
+      return;
+    }
+    setFileError(null);
+    setCameraModalMode(mode);
+    setCameraModalOpen(true);
+  };
 
   async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
     setFileError(null);
@@ -631,7 +645,8 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <>
+      <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         {trigger ?? (
           <Button
@@ -894,8 +909,53 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
               </span>
             </div>
 
-            <div className="flex gap-2">
-              <Input
+            <div className="space-y-2">
+              <div className="grid grid-cols-3 gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  aria-label={t("field_observation.camera_take_photo", "📷 Photo")}
+                  disabled={submitting || mediaList.length >= 3}
+                  onClick={() => openCamera("photo")}
+                  className="font-mono text-xs flex items-center justify-center gap-1.5 bg-secondary/40 hover:bg-secondary/70 border-border h-9"
+                  title={t("field_observation.camera_photo_title", "Open camera to capture photos")}
+                >
+                  <Camera className="h-4 w-4 text-primary" />
+                  <span>{t("field_observation.camera_take_photo", "📷 Photo")}</span>
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  aria-label={t("field_observation.camera_record_video", "🎥 Video")}
+                  disabled={submitting || mediaList.length >= 3}
+                  onClick={() => openCamera("video")}
+                  className="font-mono text-xs flex items-center justify-center gap-1.5 bg-secondary/40 hover:bg-secondary/70 border-border h-9"
+                  title={t("field_observation.camera_video_title", "Open camera to record video")}
+                >
+                  <Video className="h-4 w-4 text-red-500" />
+                  <span>{t("field_observation.camera_record_video", "🎥 Video")}</span>
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  aria-label={t("field_observation.choose_files", "📁 Files")}
+                  disabled={submitting || mediaList.length >= 3}
+                  onClick={() => document.getElementById("fieldMediaUploadInput")?.click()}
+                  className="font-mono text-xs flex items-center justify-center gap-1.5 bg-secondary/40 hover:bg-secondary/70 border-border h-9"
+                  title={t("field_observation.choose_files_title", "Choose photos or videos from device storage")}
+                >
+                  <Upload className="h-4 w-4 text-muted-foreground" />
+                  <span>{t("field_observation.choose_files", "📁 Files")}</span>
+                </Button>
+              </div>
+
+              {/* Hidden file input for file selection from device storage */}
+              <input
                 id="fieldMediaUploadInput"
                 aria-label={t("field_observation.media_title", "Field Media (Photos / Video)")}
                 type="file"
@@ -903,20 +963,34 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
                 multiple
                 disabled={submitting || mediaList.length >= 3}
                 onChange={handleFileSelect}
-                className="bg-secondary/40 border-border font-mono text-xs file:font-mono file:text-xs file:bg-primary/20 file:text-primary file:border-0 file:rounded cursor-pointer flex-1"
+                className="hidden"
               />
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                aria-label={t("field_observation.camera_button", "📷 Camera")}
-                disabled={submitting || mediaList.length >= 3}
-                onClick={handleNativeCameraCapture}
-                className="font-mono text-xs shrink-0"
-                title={t("field_observation.camera_title", "Capture photo using device camera or gallery")}
-              >
-                {t("field_observation.camera_button", "📷 Camera")}
-              </Button>
+
+              {/* Hidden direct mobile device camera capture inputs */}
+              <input
+                ref={directPhotoInputRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) processCapturedFile(f);
+                  e.target.value = "";
+                }}
+              />
+              <input
+                ref={directVideoInputRef}
+                type="file"
+                accept="video/*"
+                capture="environment"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) processCapturedFile(f);
+                  e.target.value = "";
+                }}
+              />
             </div>
 
             {fileError && <p className="text-[0.7rem] text-destructive font-mono">{fileError}</p>}
@@ -1082,5 +1156,13 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
         </form>
       </DialogContent>
     </Dialog>
+
+    <ObservationCameraModal
+      open={cameraModalOpen}
+      onOpenChange={setCameraModalOpen}
+      initialMode={cameraModalMode}
+      onCapture={processCapturedFile}
+    />
+  </>
   );
 }
