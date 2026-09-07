@@ -10,7 +10,11 @@
 
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { zonePolygon } from "./risk";
-import { extractReportType, evaluateObservationsForLocalsEscalation } from "./locals-escalation.service";
+import {
+  extractReportType,
+  evaluateObservationsForLocalsEscalation,
+  LOCALS_WINDOW_HOURS,
+} from "./locals-escalation.service";
 
 export interface FieldObservationInput {
   zone_id: number;
@@ -436,7 +440,21 @@ export async function syncFieldObservations(records: FieldObservationInput[]): P
   // Trigger LOCALS auto-escalation evaluation for synchronized pending observations
   if (validRows.length > 0) {
     try {
-      await evaluateObservationsForLocalsEscalation(validRows as any).catch((err) =>
+      let existingPendingPool: any[] = [];
+      try {
+        const windowAgo = new Date(Date.now() - LOCALS_WINDOW_HOURS * 3600000).toISOString();
+        const { data } = await supabaseAdmin
+          .from("field_observations")
+          .select("*")
+          .or("status.eq.PENDING_VERIFICATION,status.eq.SUBMITTED")
+          .gte("observed_at", windowAgo)
+          .order("observed_at", { ascending: false });
+        if (data) existingPendingPool = data;
+      } catch (err: any) {
+        console.warn("[LOCALS Sync pending pool query]", err?.message || err);
+      }
+
+      await evaluateObservationsForLocalsEscalation(validRows as any, existingPendingPool).catch((err) =>
         console.warn("[LOCALS Escalation Evaluation Notice]", err?.message || err),
       );
     } catch {

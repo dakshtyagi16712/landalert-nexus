@@ -50,7 +50,30 @@ vi.mock("@/integrations/supabase/client.server", () => {
               ...selectChain,
             };
           },
+          update: (fields: any) => ({
+            in: async (col: string, values: any[]) => {
+              MOCK_DB_RECORDS.filter((item) => values.includes(item[col])).forEach((item) =>
+                Object.assign(item, fields),
+              );
+              return { data: null, error: null };
+            },
+          }),
           select: (cols?: string) => ({
+            or: (filterStr: string) => ({
+              gte: (col: string, val: string) => ({
+                order: async (orderCol: string, opts?: any) => ({
+                  data: MOCK_DB_RECORDS.filter((r) => {
+                    const matchesStatus =
+                      r.status === "PENDING_VERIFICATION" ||
+                      r.status === "SUBMITTED" ||
+                      !r.status;
+                    const matchesTime = !r.observed_at || r.observed_at >= val;
+                    return matchesStatus && matchesTime;
+                  }),
+                  error: null,
+                }),
+              }),
+            }),
             eq: (col: string, val: unknown) => ({
               maybeSingle: async () => ({ data: null, error: null }),
               gt: () => ({

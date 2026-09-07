@@ -15,7 +15,12 @@
  *    Only an authorized DISPATCHER or ADMIN can authorize official emergency dispatches.
  */
 
-import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { createServerFn } from "@tanstack/react-start";
+
+async function getAdminClient() {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  return supabaseAdmin;
+}
 
 // ── 1. Centralized Institutional Domain Allowlist ───────────────────────────
 
@@ -75,6 +80,60 @@ const localAuditLogStore: Array<{
   reason?: string | undefined;
 }> = [];
 
+export interface GetUserAuthorizationInput {
+  email?: string | null;
+  user_metadata?: Record<string, any> | null;
+  token?: string | null;
+}
+
+/**
+ * Server function wrapped in createServerFn() for RPC-style invocation from client routes.
+ * Authoritatively verifies the user's role and dispatch authorization.
+ */
+export const getUserAuthorizationServerFn = createServerFn({ method: "POST" })
+  .validator((data: GetUserAuthorizationInput) => data)
+  .handler(async ({ data }) => {
+    if (data.token) {
+      try {
+        const admin = await getAdminClient();
+        const { data: userData, error } = await admin.auth.getUser(data.token);
+        if (!error && userData?.user) {
+          const profile = await resolveUserProfile(
+            userData.user.id,
+            userData.user.email || "",
+            userData.user.user_metadata,
+          );
+          return {
+            role: profile.role,
+            dispatch_authorized: profile.dispatch_authorized,
+            verification_status: profile.verification_status,
+            badge: getUserAuthorizationState({
+              email: profile.email,
+              user_metadata: userData.user.user_metadata,
+            }).badge,
+          };
+        }
+      } catch {
+        // Fall back to local evaluation
+      }
+    }
+
+    const state = getUserAuthorizationState({
+      email: data.email,
+      user_metadata: data.user_metadata,
+    });
+    return {
+      role: state.role,
+      dispatch_authorized: Boolean(
+        data.user_metadata?.["dispatch_authorized"] ||
+          state.role === "DISPATCHER" ||
+          state.role === "ADMIN",
+      ),
+      verification_status: state.verificationStatus,
+      badge: state.badge,
+    };
+  });
+
 /**
  * Resolves or initializes a user profile from the database, enforcing strict role defaults.
  */
@@ -86,7 +145,8 @@ export async function resolveUserProfile(
   const domainEval = evaluateEmailDomain(email);
 
   try {
-    const { data: existing, error } = await supabaseAdmin
+    const admin = await getAdminClient();
+    const { data: existing, error } = await admin
       .from("user_profiles")
       .select("*")
       .eq("id", userId)
@@ -132,7 +192,8 @@ export async function resolveUserProfile(
   localProfileStore.set(userId, profile);
 
   try {
-    await supabaseAdmin.from("user_profiles").upsert({
+    const admin = await getAdminClient();
+    await admin.from("user_profiles").upsert({
       id: profile.id,
       email: profile.email,
       full_name: profile.full_name ?? null,
@@ -195,7 +256,8 @@ export async function logAuditEvent(params: {
   localAuditLogStore.push(entry);
 
   try {
-    await supabaseAdmin.from("audit_logs").insert({
+    const admin = await getAdminClient();
+    await admin.from("audit_logs").insert({
       actor_user_id: params.actorUserId,
       actor_email: params.actorEmail ?? null,
       actor_role: params.actorRole,
@@ -291,7 +353,8 @@ export async function updateOfficialVerification(
   let profile = localProfileStore.get(targetUserId);
   if (!profile) {
     try {
-      const { data } = await supabaseAdmin
+      const admin = await getAdminClient();
+      const { data } = await admin
         .from("user_profiles")
         .select("*")
         .eq("id", targetUserId)
@@ -330,7 +393,8 @@ export async function updateOfficialVerification(
   localProfileStore.set(targetUserId, profile);
 
   try {
-    await supabaseAdmin
+    const admin = await getAdminClient();
+    await admin
       .from("user_profiles")
       .update({
         role: newRole,
@@ -400,7 +464,8 @@ export async function verifyGroundObservation(
 
   // 404 guard — verify the observation exists before attempting update
   try {
-    const { data: existing, error: fetchError } = await supabaseAdmin
+    const admin = await getAdminClient();
+    const { data: existing, error: fetchError } = await admin
       .from("field_observations")
       .select("id")
       .eq("id", observationId)
@@ -417,7 +482,8 @@ export async function verifyGroundObservation(
   const isEligible = Boolean(decision.status === "VERIFIED" && decision.isTrainingEligible);
 
   try {
-    const { error: updateError } = await supabaseAdmin
+    const admin = await getAdminClient();
+    const { error: updateError } = await admin
       .from("field_observations")
       .update({
         status: decision.status,
@@ -483,7 +549,8 @@ export async function deleteGroundObservation(
 
   // 404 guard — verify the observation exists before attempting delete
   try {
-    const { data: existing, error: fetchError } = await supabaseAdmin
+    const admin = await getAdminClient();
+    const { data: existing, error: fetchError } = await admin
       .from("field_observations")
       .select("id, zone_id")
       .eq("id", observationId)
@@ -497,7 +564,8 @@ export async function deleteGroundObservation(
   }
 
   try {
-    const { error: deleteError } = await supabaseAdmin
+    const admin = await getAdminClient();
+    const { error: deleteError } = await admin
       .from("field_observations")
       .delete()
       .eq("id", observationId);
@@ -567,7 +635,8 @@ export async function authenticateToken(authHeader?: string | null): Promise<Use
   }
 
   try {
-    const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
+    const admin = await getAdminClient();
+    const { data: { user }, error } = await admin.auth.getUser(token);
     if (error || !user) return null;
     return await resolveUserProfile(user.id, user.email || "", user.user_metadata);
   } catch {

@@ -7,7 +7,7 @@ import {
   getLocalizedDistrict,
   getLocalizedState,
 } from "@/lib/geo-translations";
-import { getUserAuthorizationState } from "@/lib/official-auth.service";
+import { getUserAuthorizationServerFn } from "@/lib/official-auth.service";
 import { scoreZonePrioritization } from "@/lib/prioritization.service";
 import { cn } from "@/lib/utils";
 import {
@@ -301,18 +301,40 @@ function ZonePage() {
   const [dispatchAuthorized, setDispatchAuthorized] = useState<boolean>(false);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (session?.user) {
-        const authState = getUserAuthorizationState({ email: session.user.email ?? "", user_metadata: session.user.user_metadata });
-        setViewerRole(authState.role);
-        setDispatchAuthorized(Boolean(session.user.user_metadata?.["dispatch_authorized"]));
+        try {
+          const authState = await getUserAuthorizationServerFn({
+            data: {
+              email: session.user.email ?? "",
+              user_metadata: session.user.user_metadata,
+              token: session.access_token,
+            },
+          });
+          setViewerRole(authState.role);
+          setDispatchAuthorized(Boolean(authState.dispatch_authorized));
+        } catch {
+          setViewerRole("PUBLIC_USER");
+          setDispatchAuthorized(false);
+        }
       }
     });
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
       if (session?.user) {
-        const authState = getUserAuthorizationState({ email: session.user.email ?? "", user_metadata: session.user.user_metadata });
-        setViewerRole(authState.role);
-        setDispatchAuthorized(Boolean(session.user.user_metadata?.["dispatch_authorized"]));
+        try {
+          const authState = await getUserAuthorizationServerFn({
+            data: {
+              email: session.user.email ?? "",
+              user_metadata: session.user.user_metadata,
+              token: session.access_token,
+            },
+          });
+          setViewerRole(authState.role);
+          setDispatchAuthorized(Boolean(authState.dispatch_authorized));
+        } catch {
+          setViewerRole("PUBLIC_USER");
+          setDispatchAuthorized(false);
+        }
       } else {
         setViewerRole("PUBLIC_USER");
         setDispatchAuthorized(false);

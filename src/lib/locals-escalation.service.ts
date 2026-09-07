@@ -8,7 +8,10 @@
  * public without auto-verifying individual observations.
  */
 
-import { supabaseAdmin } from "@/integrations/supabase/client.server";
+async function getSupabaseAdmin() {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  return supabaseAdmin;
+}
 
 // ==============================================================================
 // Named Configuration Constants
@@ -328,6 +331,7 @@ export function isClusterMateriallyOverlapping(
  */
 export async function getActiveLocalsAlerts(): Promise<LocalsAlertRecord[]> {
   try {
+    const supabaseAdmin = await getSupabaseAdmin();
     const { data, error } = await supabaseAdmin
       .from("locals_alerts")
       .select("*")
@@ -406,6 +410,7 @@ export async function createLocalsAlertRecord(
   };
 
   try {
+    const supabaseAdmin = await getSupabaseAdmin();
     const { data, error } = await supabaseAdmin
       .from("locals_alerts")
       .insert({
@@ -426,9 +431,27 @@ export async function createLocalsAlertRecord(
     if (!error && data?.id) {
       newAlert.id = Number(data.id);
     }
+
+    // Bulk-update triggering observation status to ACTIONABLE in database
+    if (triggeringIds.length > 0) {
+      try {
+        const supabaseAdmin = await getSupabaseAdmin();
+        await supabaseAdmin
+          .from("field_observations")
+          .update({ status: "ACTIONABLE" })
+          .in("id", triggeringIds);
+      } catch (err: any) {
+        console.warn("[LOCALS Actionable Status Update]", err?.message || err);
+      }
+    }
   } catch (err: any) {
     console.warn("[LOCALS Alert Persistence]", err?.message || err);
   }
+
+  // Update in-memory cluster objects so caller/tests immediately reflect ACTIONABLE status
+  cluster.forEach((obs) => {
+    (obs as any).status = "ACTIONABLE";
+  });
 
   IN_MEMORY_LOCALS_ALERTS.push(newAlert);
   return newAlert;
@@ -531,6 +554,7 @@ export async function resolveLocalsAlert(
 
   // Update in database
   try {
+    const supabaseAdmin = await getSupabaseAdmin();
     await supabaseAdmin
       .from("locals_alerts")
       .update({
