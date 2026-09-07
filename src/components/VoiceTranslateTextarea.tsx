@@ -3,8 +3,9 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { Mic, Languages, RotateCcw, Loader2 } from "lucide-react";
+import { Mic, Languages, RotateCcw, Loader2, Sparkles } from "lucide-react";
 import { translateToEnglish } from "@/lib/translation.service";
+import { translateAudioWithGemini, translateTextWithGemini } from "@/lib/gemini.service";
 import { useTranslation } from "react-i18next";
 import { saveOfflineMedia } from "@/lib/offline-media-store";
 
@@ -47,7 +48,7 @@ const EXTRA_LANGUAGES: LanguageOption[] = [
 
 const ALL_LANGUAGES = [...QUICK_LANGUAGES, ...EXTRA_LANGUAGES];
 
-// ─── Singleton in-browser Whisper pipeline (loaded on-demand) ───────────────
+// ─── Singleton in-browser Whisper fallback pipeline ──────────────────────────
 let _whisperPipeline: any = null;
 let _whisperLoadPromise: Promise<any> | null = null;
 
@@ -57,7 +58,6 @@ async function getWhisperPipeline(onProgress?: (msg: string) => void): Promise<a
 
   _whisperLoadPromise = (async () => {
     try {
-      onProgress?.("⏳ Initializing AI speech model…");
       const { pipeline, env } = await import("@xenova/transformers");
       env.backends.onnx.wasm.proxy = false;
       env.backends.onnx.wasm.numThreads = 1;
@@ -71,13 +71,12 @@ async function getWhisperPipeline(onProgress?: (msg: string) => void): Promise<a
           progress_callback: (p: any) => {
             if (p?.loaded != null && p?.total) {
               const pct = Math.round((p.loaded / p.total) * 100);
-              onProgress?.(`⏳ Loading model… ${pct}%`);
+              onProgress?.(`⏳ Offline model… ${pct}%`);
             }
           },
         }
       );
       _whisperPipeline = pipe;
-      onProgress?.("✓ Model ready");
       return pipe;
     } catch (e) {
       _whisperLoadPromise = null;
@@ -88,7 +87,6 @@ async function getWhisperPipeline(onProgress?: (msg: string) => void): Promise<a
   return _whisperLoadPromise;
 }
 
-// ─── Convert recorded audio Blob → 16 kHz Float32Array ──────────────────────
 async function blobToFloat32(blob: Blob): Promise<Float32Array | null> {
   try {
     const buf = await blob.arrayBuffer();
@@ -120,8 +118,7 @@ async function blobToFloat32(blob: Blob): Promise<Float32Array | null> {
     src.start(0);
     const rendered = await offline.startRendering();
     return rendered.getChannelData(0);
-  } catch (err) {
-    console.warn("[VoiceTranslate] Audio decode error:", err);
+  } catch {
     return null;
   }
 }
@@ -144,7 +141,6 @@ export function VoiceTranslateTextarea({
   const [originalDraft, setOriginalDraft] = useState<string | null>(null);
   const [micSupported, setMicSupported] = useState(true);
 
-  // Default to Hindi (हिन्दी) for Indian landslide zones, or active app locale if Indic
   const [selectedLang, setSelectedLang] = useState<string>(() => {
     const current = (i18n?.language || "").toLowerCase();
     if (current.startsWith("bn")) return "bn";
@@ -184,86 +180,79 @@ export function VoiceTranslateTextarea({
   const activeLangConfig: LanguageOption =
     ALL_LANGUAGES.find((l) => l.code === selectedLang) || QUICK_LANGUAGES[0]!;
 
-  // ── Translate native speech → English via Google Translate NMT ─────────────
-  const translateAndAppend = useCallback(
-    async (rawText: string, durationSecs?: number) => {
-      const trimmed = rawText.trim();
-      if (!trimmed) return false;
-
-      setIsTranslating(true);
-      try {
-        const res = await translateToEnglish(trimmed, activeLangConfig.code);
-        const translated = (res.translatedText || trimmed).trim();
-        if (translated) {
-          const current = (valueRef.current || "").trim();
-          const updated = current ? `${current} ${translated}` : translated;
-          valueRef.current = updated;
-          onChange(updated);
-          showNotice(
-            activeLangConfig.code !== "en"
-              ? `✓ Translated from ${activeLangConfig.label} → English`
-              : "✓ Transcribed in English"
-          );
-          return true;
-        }
-      } catch (err) {
-        console.warn("[VoiceTranslate] Translation error:", err);
-      } finally {
-        setIsTranslating(false);
-      }
-      return false;
+  const appendTranslatedText = useCallback(
+    (translated: string, sourceLabel: string) => {
+      const trimmed = translated.trim();
+      if (!trimmed) return;
+      const current = (valueRef.current || "").trim();
+      const updated = current ? `${current} ${trimmed}` : trimmed;
+      valueRef.current = updated;
+      onChange(updated);
+      showNotice(`✓ Translated from ${sourceLabel} → English`);
     },
-    [activeLangConfig, onChange, showNotice]
+    [onChange, showNotice]
   );
 
-  // ── Speech-to-Text via Whisper (in-browser) + Google Translate NMT ──────────
-  const transcribeBlob = useCallback(
+  // ── Primary: Gemini Flash Audio Translation with Whisper Fallback ───────────
+  const transcribeAndTranslateBlob = useCallback(
     async (blob: Blob, durationSecs: number) => {
       setIsTranslating(true);
-      showNotice(`🔄 Converting ${activeLangConfig.label} speech to English text…`, 0);
+      showNotice(`✨ Translating ${activeLangConfig.label} voice with Gemini AI…`, 0);
 
+      // 1. First-class: Google Gemini Flash Multimodal Audio Translation
       try {
-        const float32 = await blobToFloat32(blob);
-        if (!float32) throw new Error("audio-decode-failed");
-
-        const pipe = await getWhisperPipeline((msg) => setNotice(msg));
-
-        // 1. Transcribe in native language (Whisper is accurate at native transcription)
-        const result = await pipe(float32, {
-          task: "transcribe",
-          language: activeLangConfig.whisperLang,
-          chunk_length_s: 30,
-          stride_length_s: 5,
-          return_timestamps: false,
-        });
-
-        const rawText: string = (
-          Array.isArray(result)
-            ? result.map((r: any) => r.text).join(" ")
-            : result?.text || ""
-        ).trim();
-
-        if (rawText && rawText.length > 1) {
-          showNotice("🔄 Translating to English via Google Translate…", 0);
-          // 2. Translate native transcription to English using Google Translate NMT
-          const ok = await translateAndAppend(rawText, durationSecs);
-          if (ok) return;
+        const geminiRes = await translateAudioWithGemini(blob, activeLangConfig.label);
+        if (geminiRes.success && geminiRes.text?.trim()) {
+          appendTranslatedText(geminiRes.text, activeLangConfig.label);
+          setIsTranslating(false);
+          return;
         }
-        throw new Error("empty-transcription");
       } catch (err) {
-        console.warn("[VoiceTranslate] Whisper transcription failed:", err);
-        // Fallback: save voice note tag
-        const current = (valueRef.current || "").trim();
-        const tag = `[🎙️ Voice note (${durationSecs}s)]`;
-        const updated = current ? `${current} ${tag}` : tag;
-        valueRef.current = updated;
-        onChange(updated);
-        showNotice(`⚠️ Saved voice note (${durationSecs}s)`);
-      } finally {
-        setIsTranslating(false);
+        console.warn("[VoiceTranslate] Gemini audio translation error:", err);
       }
+
+      // 2. Fallback: In-browser Whisper + Google Translate
+      try {
+        showNotice("🔄 Converting speech in browser…", 0);
+        const float32 = await blobToFloat32(blob);
+        if (float32) {
+          const pipe = await getWhisperPipeline((msg) => setNotice(msg));
+          const result = await pipe(float32, {
+            task: "transcribe",
+            language: activeLangConfig.whisperLang,
+            chunk_length_s: 30,
+            stride_length_s: 5,
+            return_timestamps: false,
+          });
+
+          const rawText: string = (
+            Array.isArray(result)
+              ? result.map((r: any) => r.text).join(" ")
+              : result?.text || ""
+          ).trim();
+
+          if (rawText && rawText.length > 1) {
+            const tr = await translateToEnglish(rawText, activeLangConfig.code);
+            const finalText = tr.translatedText || rawText;
+            appendTranslatedText(finalText, activeLangConfig.label);
+            setIsTranslating(false);
+            return;
+          }
+        }
+      } catch (err) {
+        console.warn("[VoiceTranslate] Whisper fallback error:", err);
+      }
+
+      // 3. Offline voice note fallback
+      const current = (valueRef.current || "").trim();
+      const tag = `[🎙️ Voice note (${durationSecs}s)]`;
+      const updated = current ? `${current} ${tag}` : tag;
+      valueRef.current = updated;
+      onChange(updated);
+      showNotice(`⚠️ Saved voice note (${durationSecs}s)`);
+      setIsTranslating(false);
     },
-    [activeLangConfig, translateAndAppend, onChange, showNotice]
+    [activeLangConfig, appendTranslatedText, onChange, showNotice]
   );
 
   // ── Optional parallel Web Speech API ───────────────────────────────────────
@@ -287,7 +276,8 @@ export function VoiceTranslateTextarea({
           const transcript = res[0]?.transcript || "";
           if (res.isFinal && transcript.trim()) {
             hasLiveTranscribedRef.current = true;
-            await translateAndAppend(transcript.trim());
+            const tr = await translateToEnglish(transcript.trim(), activeLangConfig.code);
+            appendTranslatedText(tr.translatedText || transcript.trim(), activeLangConfig.label);
           }
         }
       };
@@ -302,7 +292,7 @@ export function VoiceTranslateTextarea({
     } catch {
       recognitionRef.current = null;
     }
-  }, [activeLangConfig.speechCode, translateAndAppend]);
+  }, [activeLangConfig, appendTranslatedText]);
 
   // ── Start recording ────────────────────────────────────────────────────────
   const startListening = useCallback(async () => {
@@ -354,7 +344,6 @@ export function VoiceTranslateTextarea({
       const durationSecs = Math.max(1, Math.round((Date.now() - recordStartRef.current) / 1000));
       const blob = new Blob(audioChunksRef.current, { type: mimeType || "audio/webm" });
 
-      // Save audio to IndexedDB for report attachment
       try {
         const mediaId = `voice_memo_${Date.now()}`;
         await saveOfflineMedia(mediaId, blob, {
@@ -367,9 +356,8 @@ export function VoiceTranslateTextarea({
         // Non-fatal
       }
 
-      // If live transcription already captured text, done; otherwise transcribe with Whisper + Google Translate
       if (!hasLiveTranscribedRef.current) {
-        await transcribeBlob(blob, durationSecs);
+        await transcribeAndTranslateBlob(blob, durationSecs);
       }
     };
 
@@ -387,7 +375,7 @@ export function VoiceTranslateTextarea({
     }, 1000);
 
     showNotice(`🎙️ Listening in ${activeLangConfig.label}… speak clearly.`, 4000);
-  }, [activeLangConfig, attachLiveRecognition, transcribeBlob, onAudioRecorded, showNotice]);
+  }, [activeLangConfig, attachLiveRecognition, transcribeAndTranslateBlob, onAudioRecorded, showNotice]);
 
   const stopListening = useCallback(() => {
     isListeningRef.current = false;
@@ -431,11 +419,26 @@ export function VoiceTranslateTextarea({
     clearInterval(recordTimerRef.current);
   }, []);
 
-  // ── Translate typed text ───────────────────────────────────────────────────
+  // ── Translate typed text with Gemini AI ─────────────────────────────────────
   const handleTranslateTyped = async () => {
     if (!value.trim()) return;
     setIsTranslating(true);
     setOriginalDraft(value.trim());
+
+    // 1. Try Gemini AI text translation
+    try {
+      const gRes = await translateTextWithGemini(value.trim(), activeLangConfig.label);
+      if (gRes.success && gRes.text) {
+        onChange(gRes.text);
+        showNotice(`✓ Translated via Gemini AI (${activeLangConfig.label} → English)`);
+        setIsTranslating(false);
+        return;
+      }
+    } catch {
+      // Fallback
+    }
+
+    // 2. Fallback to Google Translate NMT
     const res = await translateToEnglish(value.trim(), selectedLang || "auto");
     setIsTranslating(false);
     if (res.success && res.translatedText) {
@@ -464,7 +467,7 @@ export function VoiceTranslateTextarea({
           htmlFor={id}
           className="text-xs font-mono uppercase text-muted-foreground flex items-center gap-1.5"
         >
-          <Languages className="h-3.5 w-3.5 text-primary" />
+          <Sparkles className="h-3.5 w-3.5 text-primary" />
           <span>{label || t("field_observation.notes_label", "Field Notes & Description")}</span>
         </Label>
 
@@ -536,7 +539,7 @@ export function VoiceTranslateTextarea({
               title={
                 isListening
                   ? "Stop recording"
-                  : `Speak in ${activeLangConfig.label} (auto-translates to English)`
+                  : `Speak in ${activeLangConfig.label} (Gemini AI voice translation)`
               }
               aria-label="Toggle voice recording"
             >
@@ -555,7 +558,7 @@ export function VoiceTranslateTextarea({
             disabled={disabled || isTranslating || !value.trim()}
             onClick={handleTranslateTyped}
             className="h-7 w-7 p-0 rounded-full bg-card hover:bg-secondary shadow-sm"
-            title="Translate typed text to English (Google Translate)"
+            title="Translate typed text to English (Gemini AI)"
             aria-label="Translate"
           >
             {isTranslating ? (
@@ -600,7 +603,7 @@ export function VoiceTranslateTextarea({
           {isTranslating && (
             <span className="text-muted-foreground flex items-center gap-1">
               <Loader2 className="h-3 w-3 animate-spin text-primary" />
-              <span>{t("field_observation.translating_to_en", "Translating to English…")}</span>
+              <span>{t("field_observation.translating_to_en", "Translating with Gemini AI…")}</span>
             </span>
           )}
 
@@ -609,8 +612,12 @@ export function VoiceTranslateTextarea({
           )}
         </div>
 
-        <div className="text-muted-foreground shrink-0">
-          {value.length}/{maxLength} • {t("field_observation.auto_en", "Google Translate")}
+        <div className="text-muted-foreground shrink-0 flex items-center gap-1">
+          <span>{value.length}/{maxLength}</span>
+          <span>•</span>
+          <span className="text-primary font-semibold flex items-center gap-0.5">
+            <Sparkles className="h-2.5 w-2.5 inline" /> Gemini AI
+          </span>
         </div>
       </div>
     </div>
