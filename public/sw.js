@@ -10,7 +10,7 @@
  * 5. Strict offline data semantics: NO fabricated weather, ML, or alerts
  */
 
-const CACHE_NAME = "landalert-pwa-v22afabcd78";
+const CACHE_NAME = "landalert-pwa-v1a463a4a5d";
 const MAP_CACHE = "landalert-tiles-v1";
 const DATA_CACHE = "landalert-data-v1";
 
