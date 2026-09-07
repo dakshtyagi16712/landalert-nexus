@@ -11,7 +11,7 @@ import { EmergencyHelpDialog } from "./EmergencyHelpDialog";
 import { FieldObservationDialog } from "./FieldObservationDialog";
 import { AuthDialog } from "./AuthDialog";
 import { OfflineBanner } from "./OfflineBanner";
-import { Search, ChevronDown, UserCheck, Shield } from "lucide-react";
+import { Search, ChevronDown, UserCheck, Shield, Phone } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { getUserAuthorizationState } from "@/lib/auth-domains";
 import { searchGeography, type SearchResultItem } from "@/lib/geography";
@@ -205,9 +205,10 @@ export function ConsoleNav() {
               trigger={
                 <button
                   type="button"
-                  className="px-2 py-1 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 rounded transition-colors"
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-bold text-red-700 bg-red-50 hover:bg-red-100/90 border border-red-200/90 dark:text-red-300 dark:bg-red-950/50 dark:border-red-800/70 dark:hover:bg-red-900/60 rounded-md shadow-2xs transition-all cursor-pointer"
                 >
-                  {t("header.help", "Help")}
+                  <Phone className="h-3 w-3 text-red-600 dark:text-red-400 shrink-0 animate-pulse" />
+                  <span>{t("header.emergency_helpline", "Emergency Helpline")}</span>
                 </button>
               }
             />

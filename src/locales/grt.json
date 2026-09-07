@@ -383,11 +383,12 @@
     "gsi": "A·chik Geological Survey of India",
     "app_title": "A·chik LandAlert-Nexus",
     "app_subtitle": "North Eastern Region-na A·brik Ronggim Mikrakatani Ramram",
-    "help": "Dakchakanirang",
+    "help": "Gong·gong Dakchakanirang",
     "accessibility": "Gong·rakatani",
     "operator": "Kam Ka·gipa",
     "sign_in": "Napbo",
-    "profile": "Kam Ka·gipani Gimin"
+    "profile": "Kam Ka·gipani Gimin",
+    "emergency_helpline": "Gong·gong Dakchakanirang"
   },
   "hero": {
     "region_tag": "A·chik NORTH EASTERN REGION",

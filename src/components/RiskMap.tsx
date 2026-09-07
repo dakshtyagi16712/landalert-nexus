@@ -71,6 +71,21 @@ function MapResizeHandler({
   return null;
 }
 
+export type RiskMapLayerControls = {
+  showSpatialGrid: boolean;
+  setShowSpatialGrid: (v: boolean) => void;
+  showInSarDeformation: boolean;
+  setShowInSarDeformation: (v: boolean) => void;
+  showVillages: boolean;
+  setShowVillages: (v: boolean) => void;
+  showInfrastructure: boolean;
+  setShowInfrastructure: (v: boolean) => void;
+  showTrueColor: boolean;
+  setShowTrueColor: (v: boolean) => void;
+  showNdvi: boolean;
+  setShowNdvi: (v: boolean) => void;
+};
+
 type Props = {
   zones: ZoneRow[];
   slides?: SlideRow[];
@@ -80,6 +95,8 @@ type Props = {
   zoom?: number;
   spatialCells?: CellRiskEvaluation[];
   onSelectCell?: (cell: CellRiskEvaluation) => void;
+  layerControls?: RiskMapLayerControls;
+  hideFloatingControls?: boolean;
 };
 
 type VillageFeature = {
@@ -129,6 +146,8 @@ export default function RiskMap({
   zoom = 7,
   spatialCells = [],
   onSelectCell,
+  layerControls,
+  hideFloatingControls = false,
 }: Props) {
   const { t } = useTranslation();
   const [satelliteStatus, setSatelliteStatus] = useState<{
@@ -136,12 +155,27 @@ export default function RiskMap({
     configured: boolean;
     attribution?: string;
   } | null>(null);
-  const [showTrueColor, setShowTrueColor] = useState(false);
-  const [showNdvi, setShowNdvi] = useState(false);
-  const [showSpatialGrid, setShowSpatialGrid] = useState(true);
-  const [showInSarDeformation, setShowInSarDeformation] = useState(false);
-  const [showVillages, setShowVillages] = useState(true);
-  const [showInfrastructure, setShowInfrastructure] = useState(true);
+
+  const [internalShowTrueColor, setInternalShowTrueColor] = useState(false);
+  const [internalShowNdvi, setInternalShowNdvi] = useState(false);
+  const [internalShowSpatialGrid, setInternalShowSpatialGrid] = useState(true);
+  const [internalShowInSarDeformation, setInternalShowInSarDeformation] = useState(false);
+  const [internalShowVillages, setInternalShowVillages] = useState(true);
+  const [internalShowInfrastructure, setInternalShowInfrastructure] = useState(true);
+
+  const showTrueColor = layerControls ? layerControls.showTrueColor : internalShowTrueColor;
+  const setShowTrueColor = layerControls ? layerControls.setShowTrueColor : setInternalShowTrueColor;
+  const showNdvi = layerControls ? layerControls.showNdvi : internalShowNdvi;
+  const setShowNdvi = layerControls ? layerControls.setShowNdvi : setInternalShowNdvi;
+  const showSpatialGrid = layerControls ? layerControls.showSpatialGrid : internalShowSpatialGrid;
+  const setShowSpatialGrid = layerControls ? layerControls.setShowSpatialGrid : setInternalShowSpatialGrid;
+  const showInSarDeformation = layerControls ? layerControls.showInSarDeformation : internalShowInSarDeformation;
+  const setShowInSarDeformation = layerControls ? layerControls.setShowInSarDeformation : setInternalShowInSarDeformation;
+  const showVillages = layerControls ? layerControls.showVillages : internalShowVillages;
+  const setShowVillages = layerControls ? layerControls.setShowVillages : setInternalShowVillages;
+  const showInfrastructure = layerControls ? layerControls.showInfrastructure : internalShowInfrastructure;
+  const setShowInfrastructure = layerControls ? layerControls.setShowInfrastructure : setInternalShowInfrastructure;
+
   const [villagesData, setVillagesData] = useState<GeoJsonFeatureCollection<VillageFeature> | null>(null);
   const [infrastructureData, setInfrastructureData] = useState<GeoJsonFeatureCollection<InfrastructureFeature> | null>(null);
   const [villagesError, setVillagesError] = useState<string | null>(null);
@@ -449,116 +483,118 @@ export default function RiskMap({
         }
       `}</style>
       {/* Layer Controls Panel (Satellite & Spatial Grid) */}
-      <div className="absolute top-3 right-3 z-[400] flex flex-col gap-1.5 rounded border border-border/80 bg-background/95 p-2.5 shadow-lg backdrop-blur text-xs font-mono">
-        <div className="flex items-center justify-between gap-2 border-b border-border/50 pb-1 mb-1">
-          <span className="font-semibold text-primary uppercase text-[0.68rem] tracking-wider">
-            {t("risk_map.layers_title", "Layers & Grid")}
-          </span>
-          <span
-            className="text-[0.65rem] text-muted-foreground cursor-help"
-            title={t("risk_map.spatial_coverage_info", "Continuous 0.25° spatial landslide risk prediction grid across all 8 Northeast states.")}
-          >
-            {spatialCells.length} cells
-          </span>
+      {!hideFloatingControls && !layerControls && (
+        <div className="absolute top-3 right-3 z-[400] flex flex-col gap-1.5 rounded border border-border/80 bg-background/95 p-2.5 shadow-lg backdrop-blur text-xs font-mono">
+          <div className="flex items-center justify-between gap-2 border-b border-border/50 pb-1 mb-1">
+            <span className="font-semibold text-primary uppercase text-[0.68rem] tracking-wider">
+              {t("risk_map.layers_title", "Layers & Grid")}
+            </span>
+            <span
+              className="text-[0.65rem] text-muted-foreground cursor-help"
+              title={t("risk_map.spatial_coverage_info", "Continuous 0.25° spatial landslide risk prediction grid across all 8 Northeast states.")}
+            >
+              {spatialCells.length} cells
+            </span>
+          </div>
+
+          {/* Spatial Grid Toggle */}
+          <label className="flex items-center gap-2 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={showSpatialGrid}
+              onChange={(e) => setShowSpatialGrid(e.target.checked)}
+              className="rounded border-border text-primary"
+            />
+            <span className="text-[0.72rem] font-semibold text-foreground">
+              {t("risk_map.show_spatial_surface", "8-State Spatial Risk Surface")}
+            </span>
+          </label>
+
+          {/* InSAR Ground Deformation Layer Toggle */}
+          <label className="flex items-center gap-2 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={showInSarDeformation}
+              onChange={(e) => setShowInSarDeformation(e.target.checked)}
+              className="rounded border-border text-violet-500"
+            />
+            <span className="text-[0.72rem] font-semibold text-foreground flex items-center gap-1">
+              <span className="w-2 h-2 rounded-full bg-violet-500 inline-block"></span>
+              {t("risk_map.show_insar_layer", "InSAR Ground Deformation")}
+            </span>
+          </label>
+
+          {/* Villages Layer Toggle */}
+          <label className="flex items-center gap-2 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={showVillages}
+              onChange={(e) => setShowVillages(e.target.checked)}
+              className="rounded border-border text-sky-500"
+            />
+            <span className="text-[0.72rem] font-semibold text-foreground flex items-center gap-1">
+              <span className="w-2 h-2 rounded-full bg-sky-500 inline-block"></span>
+              {t("risk_map.show_villages", "Villages & Hamlets")}
+              {villagesData && (
+                <span className="text-[0.65rem] text-muted-foreground">({villagesData.features.length})</span>
+              )}
+              {villagesError && (
+                <span className="text-[0.65rem] text-amber-500" title={villagesError}>(unavailable)</span>
+              )}
+            </span>
+          </label>
+
+          {/* Critical Infrastructure Layer Toggle */}
+          <label className="flex items-center gap-2 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={showInfrastructure}
+              onChange={(e) => setShowInfrastructure(e.target.checked)}
+              className="rounded border-border text-red-500"
+            />
+            <span className="text-[0.72rem] font-semibold text-foreground flex items-center gap-1">
+              <span className="w-2 h-2 rounded-full bg-red-500 inline-block"></span>
+              {t("risk_map.show_infrastructure", "Critical Infrastructure")}
+              {infrastructureData && (
+                <span className="text-[0.65rem] text-muted-foreground">({infrastructureData.features.length})</span>
+              )}
+              {infrastructureError && (
+                <span className="text-[0.65rem] text-amber-500" title={infrastructureError}>(unavailable)</span>
+              )}
+            </span>
+          </label>
+
+          {/* Satellite Imagery Layer Controls */}
+          {hasSatellite && (
+            <>
+              <div className="border-t border-border/40 pt-1 mt-0.5 text-[0.65rem] uppercase text-muted-foreground font-semibold">
+                {t("risk_map.sentinel_visuals", "🛰 Sentinel-2 Visuals")}
+              </div>
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={showTrueColor}
+                  onChange={(e) => setShowTrueColor(e.target.checked)}
+                  className="rounded border-border text-primary"
+                />
+                <span className="text-[0.72rem]">{t("risk_map.true_color", "True-Color Imagery")}</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={showNdvi}
+                  onChange={(e) => setShowNdvi(e.target.checked)}
+                  className="rounded border-border text-primary"
+                />
+                <span className="text-[0.72rem]">{t("risk_map.ndvi_vegetation", "NDVI Vegetation Index")}</span>
+              </label>
+              <div className="text-[0.62rem] text-muted-foreground/80 pt-0.5 border-t border-border/30">
+                {t("risk_map.sentinel_attribution", "Copernicus Sentinel data 2026")}
+              </div>
+            </>
+          )}
         </div>
-
-        {/* Spatial Grid Toggle */}
-        <label className="flex items-center gap-2 cursor-pointer select-none">
-          <input
-            type="checkbox"
-            checked={showSpatialGrid}
-            onChange={(e) => setShowSpatialGrid(e.target.checked)}
-            className="rounded border-border text-primary"
-          />
-          <span className="text-[0.72rem] font-semibold text-foreground">
-            {t("risk_map.show_spatial_surface", "8-State Spatial Risk Surface")}
-          </span>
-        </label>
-
-        {/* InSAR Ground Deformation Layer Toggle */}
-        <label className="flex items-center gap-2 cursor-pointer select-none">
-          <input
-            type="checkbox"
-            checked={showInSarDeformation}
-            onChange={(e) => setShowInSarDeformation(e.target.checked)}
-            className="rounded border-border text-violet-500"
-          />
-          <span className="text-[0.72rem] font-semibold text-foreground flex items-center gap-1">
-            <span className="w-2 h-2 rounded-full bg-violet-500 inline-block"></span>
-            {t("risk_map.show_insar_layer", "InSAR Ground Deformation")}
-          </span>
-        </label>
-
-        {/* Villages Layer Toggle */}
-        <label className="flex items-center gap-2 cursor-pointer select-none">
-          <input
-            type="checkbox"
-            checked={showVillages}
-            onChange={(e) => setShowVillages(e.target.checked)}
-            className="rounded border-border text-sky-500"
-          />
-          <span className="text-[0.72rem] font-semibold text-foreground flex items-center gap-1">
-            <span className="w-2 h-2 rounded-full bg-sky-500 inline-block"></span>
-            {t("risk_map.show_villages", "Villages & Hamlets")}
-            {villagesData && (
-              <span className="text-[0.65rem] text-muted-foreground">({villagesData.features.length})</span>
-            )}
-            {villagesError && (
-              <span className="text-[0.65rem] text-amber-500" title={villagesError}>(unavailable)</span>
-            )}
-          </span>
-        </label>
-
-        {/* Critical Infrastructure Layer Toggle */}
-        <label className="flex items-center gap-2 cursor-pointer select-none">
-          <input
-            type="checkbox"
-            checked={showInfrastructure}
-            onChange={(e) => setShowInfrastructure(e.target.checked)}
-            className="rounded border-border text-red-500"
-          />
-          <span className="text-[0.72rem] font-semibold text-foreground flex items-center gap-1">
-            <span className="w-2 h-2 rounded-full bg-red-500 inline-block"></span>
-            {t("risk_map.show_infrastructure", "Critical Infrastructure")}
-            {infrastructureData && (
-              <span className="text-[0.65rem] text-muted-foreground">({infrastructureData.features.length})</span>
-            )}
-            {infrastructureError && (
-              <span className="text-[0.65rem] text-amber-500" title={infrastructureError}>(unavailable)</span>
-            )}
-          </span>
-        </label>
-
-        {/* Satellite Imagery Layer Controls */}
-        {hasSatellite && (
-          <>
-            <div className="border-t border-border/40 pt-1 mt-0.5 text-[0.65rem] uppercase text-muted-foreground font-semibold">
-              {t("risk_map.sentinel_visuals", "🛰 Sentinel-2 Visuals")}
-            </div>
-            <label className="flex items-center gap-2 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={showTrueColor}
-                onChange={(e) => setShowTrueColor(e.target.checked)}
-                className="rounded border-border text-primary"
-              />
-              <span className="text-[0.72rem]">{t("risk_map.true_color", "True-Color Imagery")}</span>
-            </label>
-            <label className="flex items-center gap-2 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={showNdvi}
-                onChange={(e) => setShowNdvi(e.target.checked)}
-                className="rounded border-border text-primary"
-              />
-              <span className="text-[0.72rem]">{t("risk_map.ndvi_vegetation", "NDVI Vegetation Index")}</span>
-            </label>
-            <div className="text-[0.62rem] text-muted-foreground/80 pt-0.5 border-t border-border/30">
-              {t("risk_map.sentinel_attribution", "Copernicus Sentinel data 2026")}
-            </div>
-          </>
-        )}
-      </div>
+      )}
 
       <MapContainer
         center={center}

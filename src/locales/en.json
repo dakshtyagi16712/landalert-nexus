@@ -409,11 +409,12 @@
     "gsi": "Geological Survey of India",
     "app_title": "LandAlert-Nexus",
     "app_subtitle": "Landslide Early Warning System for North Eastern Region",
-    "help": "Help",
+    "help": "Emergency Helpline",
     "accessibility": "Accessibility",
     "operator": "Operator",
     "sign_in": "Sign In",
-    "profile": "Operator Profile"
+    "profile": "Operator Profile",
+    "emergency_helpline": "Emergency Helpline"
   },
   "hero": {
     "region_tag": "NORTH EASTERN REGION",

@@ -375,7 +375,7 @@ export async function createLocalsAlertRecord(
         await supabaseAdmin
           .from("field_observations")
           .update({ status: "ACTIONABLE" })
-          .in("id", triggeringIds);
+          .in("id", triggeringIds.map(String));
       } catch (err: any) {
         console.warn("[LOCALS Actionable Status Update]", err?.message || err);
       }

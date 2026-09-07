@@ -383,11 +383,12 @@
     "gsi": "Mizo Geological Survey of India",
     "app_title": "Mizo LandAlert-Nexus",
     "app_subtitle": "North Eastern Region Tlang Min Vengtu Warning System",
-    "help": "Tanpuina",
+    "help": "Rangva Helpline",
     "accessibility": "Awlsamna",
     "operator": "Thawktu",
     "sign_in": "Lut rawh",
-    "profile": "Thawktu Dinhmun"
+    "profile": "Thawktu Dinhmun",
+    "emergency_helpline": "Rangva Helpline"
   },
   "hero": {
     "region_tag": "Mizo NORTH EASTERN REGION",

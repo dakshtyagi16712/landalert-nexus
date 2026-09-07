@@ -417,11 +417,11 @@ describe("LOCALS Escalation Service", () => {
 
       // Successfully triggers LOCALS alert because the aggregated pool (6 + 4) >= 10
       expect(secondSyncAlerts).toHaveLength(1);
-      expect(secondSyncAlerts[0].observation_count).toBe(10);
-      expect(secondSyncAlerts[0].detection_method).toBe("gps_proximity");
-      expect(secondSyncAlerts[0].report_type).toBe("slope_movement");
-      expect(secondSyncAlerts[0].status).toBe("ACTIVE");
-      expect(secondSyncAlerts[0].triggering_observation_ids).toHaveLength(10);
+      expect(secondSyncAlerts[0]!.observation_count).toBe(10);
+      expect(secondSyncAlerts[0]!.detection_method).toBe("gps_proximity");
+      expect(secondSyncAlerts[0]!.report_type).toBe("slope_movement");
+      expect(secondSyncAlerts[0]!.status).toBe("ACTIVE");
+      expect(secondSyncAlerts[0]!.triggering_observation_ids).toHaveLength(10);
     });
 
     it("bulk-updates triggering observations' status to ACTIONABLE when a cluster triggers", async () => {

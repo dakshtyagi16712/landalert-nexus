@@ -10,7 +10,7 @@
  * 5. Strict offline data semantics: NO fabricated weather, ML, or alerts
  */
 
-const CACHE_NAME = "landalert-pwa-vc5ed74471f";
+const CACHE_NAME = "landalert-pwa-v1a463a4a5d";
 const MAP_CACHE = "landalert-tiles-v1";
 const DATA_CACHE = "landalert-data-v1";
 
@@ -18,39 +18,39 @@ const PRECACHE_ASSETS = [
   "/",
   "/alerts",
   "/apple-touch-icon.png",
-  "/assets/ConsoleShell-B4SkA2Yc.js",
-  "/assets/FieldObservationDialog-DYjqyEys.js",
-  "/assets/MapCanvas-DRxbLOGU.js",
-  "/assets/RiskBits-D7QIawDY.js",
-  "/assets/RiskMap-CHKJ_wKy.js",
+  "/assets/ConsoleShell-Bx-lOy7t.js",
+  "/assets/FieldObservationDialog-obt3BQrk.js",
+  "/assets/MapCanvas-S5mm0iaz.js",
+  "/assets/RiskBits-CgRXOgPi.js",
+  "/assets/RiskMap-D_Nn3qy6.js",
   "/assets/RiskMap-vh-t_kPv.css",
-  "/assets/alerts-BqdV6BU3.js",
-  "/assets/alerts-SEqwh0If.js",
+  "/assets/alerts-6Ka-Jrfw.js",
+  "/assets/alerts-BGWQVJ63.js",
   "/assets/atkinson-hyperlegible-latin-400-normal-BbWidj28.woff",
   "/assets/atkinson-hyperlegible-latin-400-normal-BrHNak5F.woff2",
   "/assets/atkinson-hyperlegible-latin-ext-400-normal-Bbz-b3yf.woff",
   "/assets/atkinson-hyperlegible-latin-ext-400-normal-DRk46D-x.woff2",
   "/assets/circle-x-BGJvHPNN.js",
-  "/assets/client-D1XpFwkv.js",
-  "/assets/clock-Bm1Vp3Jf.js",
+  "/assets/client-CAI-bpRD.js",
+  "/assets/clock-BnIlMQzG.js",
   "/assets/dist-Btb5Jv1E.js",
   "/assets/geo-translations-B89rMh4-.js",
-  "/assets/index-B2fXk2BN.js",
+  "/assets/index-Buf2aPot.js",
   "/assets/lock--2AxhOJb.js",
-  "/assets/observations-SEqwh0If.js",
+  "/assets/observations-BGWQVJ63.js",
   "/assets/offline-media-store-CN5gqWjJ.js",
   "/assets/queryOptions-T1t5ds6z.js",
   "/assets/risk-CkQ7Hukn.js",
   "/assets/rolldown-runtime-B0Z9INg1.js",
   "/assets/route-Z0tX_F9o.js",
-  "/assets/routes-SEqwh0If.js",
-  "/assets/routes-k6oYDYAb.js",
-  "/assets/styles-DBcdPjT3.css",
-  "/assets/textarea-DZAAbMSw.js",
+  "/assets/routes-BGWQVJ63.js",
+  "/assets/routes-YDrZID0d.js",
+  "/assets/styles-CZpu9SRo.css",
+  "/assets/textarea-tlxbj-2Y.js",
   "/assets/transformers-BGTKhuSD.js",
   "/assets/web-Dqf9dW0a.js",
-  "/assets/zones._id-Cp0aDix2.js",
-  "/assets/zones._id-SEqwh0If.js",
+  "/assets/zones._id-BGWQVJ63.js",
+  "/assets/zones._id-CwzzWjum.js",
   "/emblem-of-india.svg",
   "/favicon.ico",
   "/favicon.svg",
@@ -279,7 +279,7 @@ self.addEventListener("fetch", (event) => {
                 cache.put(request, fresh);
               }
             })
-            .catch(() => {});
+            .catch(() => { });
           return cached;
         }
 

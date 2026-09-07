@@ -28,6 +28,7 @@ import {
   dispatchAlertServerFn,
   getZoneWeatherRiskForecastServerFn,
 } from "@/lib/monitoring.functions";
+import { projectZoneRiskForecast } from "@/lib/forecast.service";
 import { MapCanvas } from "@/components/MapCanvas";
 import {
   RiskBadge,
@@ -41,7 +42,7 @@ import {
 } from "@/components/RiskBits";
 import { PanelSkeleton, RouteError } from "@/components/ConsoleShell";
 import { FieldObservationDialog } from "@/components/FieldObservationDialog";
-import { intensityThresholdMmPerDay, moistureThresholdMm, riskColor } from "@/lib/risk";
+import { intensityThresholdMmPerDay, moistureThresholdMm, riskColor, type RiskLevel } from "@/lib/risk";
 import { Button } from "@/components/ui/button";
 import { ShieldAlert, Lock } from "lucide-react";
 import { Input } from "@/components/ui/input";
@@ -180,7 +181,52 @@ function ZonePage() {
 
   const { data: forecastData, isLoading: forecastLoading } = useQuery({
     queryKey: ["weather-forecast", Number(id)],
-    queryFn: () => getZoneWeatherRiskForecastServerFn({ data: { zoneId: Number(id) } }),
+    queryFn: async () => {
+      try {
+        const serverRes = await getZoneWeatherRiskForecastServerFn({ data: { zoneId: Number(id) } });
+        if (serverRes && serverRes.forecastStatus === "AVAILABLE" && serverRes.forecastWindows) {
+          return serverRes;
+        }
+      } catch (err) {
+        console.warn("[Forecast] Server function failed, trying direct browser weather fetch:", err);
+      }
+
+      // Direct client-side fetch from Open-Meteo as high-resilience fallback
+      try {
+        const lat = zone.centroid_lat ?? 25.5;
+        const lng = zone.centroid_lng ?? 91.8;
+        const res = await fetch(
+          `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&daily=precipitation_sum&forecast_days=4&timezone=UTC`
+        );
+        if (res.ok) {
+          const payload = await res.json();
+          const precip = payload?.daily?.precipitation_sum as (number | null)[] | undefined;
+          if (precip && precip.length >= 4) {
+            const day1 = precip[1] ?? 0;
+            const day2 = precip[2] ?? 0;
+            const day3 = precip[3] ?? 0;
+            return projectZoneRiskForecast({
+              zoneId: Number(id),
+              zoneName: zone.zone_name,
+              district: zone.district,
+              state: zone.state,
+              currentRiskLevel: (zone.current_risk_level as RiskLevel) ?? "Low",
+              currentRiskScore: zone.risk_score ?? 25,
+              threshold_e_mm: zone.threshold_e_mm ?? undefined,
+              threshold_i_coefficient: (zone as any).threshold_i_coefficient,
+              threshold_i_exponent: (zone as any).threshold_i_exponent,
+              forecast_24h_mm: day1,
+              forecast_48h_mm: day1 + day2,
+              forecast_72h_mm: day1 + day2 + day3,
+            });
+          }
+        }
+      } catch (clientErr) {
+        console.warn("[Forecast] Client-side Open-Meteo fallback failed:", clientErr);
+      }
+
+      return null;
+    },
   });
 
   const {
