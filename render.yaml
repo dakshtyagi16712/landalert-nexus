@@ -117,7 +117,7 @@ services:
         value: "true"
 
       - key: MEDIA_UPLOAD_ENABLED
-        value: "false"
+        value: "true"
 
       - key: SATELLITE_LAYER_ENABLED
         value: "false"

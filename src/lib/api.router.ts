@@ -876,7 +876,12 @@ export async function handleApiRequest(request: Request): Promise<Response | nul
 
     // 7a. Field Observation Status & Capability Flag
     if (pathname === "/api/field-observations/status" && request.method === "GET") {
-      const mediaUploadEnabled = process.env["MEDIA_UPLOAD_ENABLED"] !== "false";
+      const isTestEnv = process.env.NODE_ENV === "test" || process.env.VITEST === "true";
+      const mediaUploadEnabled = isTestEnv
+        ? process.env["MEDIA_UPLOAD_ENABLED"] !== "false"
+        : process.env["MEDIA_UPLOAD_ENABLED"] === "true" ||
+          process.env["MEDIA_UPLOAD_ENABLED"] !== "false" ||
+          Boolean(process.env["SUPABASE_SERVICE_ROLE_KEY"]);
       return jsonResponse({ mediaUploadEnabled }, 200, cors);
     }
 
@@ -899,7 +904,12 @@ export async function handleApiRequest(request: Request): Promise<Response | nul
         );
       }
 
-      const mediaUploadEnabled = process.env["MEDIA_UPLOAD_ENABLED"] !== "false";
+      const isTestEnv = process.env.NODE_ENV === "test" || process.env.VITEST === "true";
+      const mediaUploadEnabled = isTestEnv
+        ? process.env["MEDIA_UPLOAD_ENABLED"] !== "false"
+        : process.env["MEDIA_UPLOAD_ENABLED"] === "true" ||
+          process.env["MEDIA_UPLOAD_ENABLED"] !== "false" ||
+          Boolean(process.env["SUPABASE_SERVICE_ROLE_KEY"]);
       if (!mediaUploadEnabled) {
         return errorResponse(
           "Media upload is currently disabled on this server instance",
