@@ -60,13 +60,13 @@ export interface ForecastEvaluationInput {
   state: string;
   currentRiskLevel: RiskLevel;
   currentRiskScore: number;
-  threshold_e_mm?: number;
-  threshold_i_coefficient?: number;
-  threshold_i_exponent?: number;
+  threshold_e_mm?: number | undefined;
+  threshold_i_coefficient?: number | undefined;
+  threshold_i_exponent?: number | undefined;
   forecast_24h_mm: number | null;
   forecast_48h_mm: number | null;
   forecast_72h_mm: number | null;
-  antecedent_30d_mm?: number;
+  antecedent_30d_mm?: number | undefined;
 }
 
 // In-memory cache of latest fetched forecasts per zone
@@ -260,6 +260,20 @@ export async function getZoneWeatherForecastProjection(
     return cached;
   }
 
+  let zoneData: {
+    id: number;
+    zone_name: string;
+    district: string;
+    state: string;
+    centroid_lat: number;
+    centroid_lng: number;
+    current_risk_level?: string;
+    risk_score?: number;
+    threshold_e_mm?: number;
+    threshold_i_coefficient?: number;
+    threshold_i_exponent?: number;
+  } | null = null;
+
   try {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { data: zone, error } = await supabaseAdmin
@@ -268,13 +282,40 @@ export async function getZoneWeatherForecastProjection(
       .eq("id", zoneId)
       .maybeSingle();
 
-    if (error || !zone) {
-      throw new Error(error?.message ?? `Zone ${zoneId} not found`);
+    if (!error && zone) {
+      zoneData = zone as any;
     }
+  } catch (dbErr) {
+    console.warn(`[Forecast Service] Supabase lookup failed for zone ${zoneId}, falling back to static metadata:`, dbErr);
+  }
 
+  // Fallback to static monitored zone catalog if Supabase is offline/unreachable
+  if (!zoneData) {
+    const { NER_MONITORED_ZONES } = await import("./geography");
+    const fallback = NER_MONITORED_ZONES[zoneId];
+    if (fallback) {
+      zoneData = {
+        id: fallback.id,
+        zone_name: fallback.name,
+        district: fallback.district,
+        state: fallback.state,
+        centroid_lat: fallback.centroid_lat,
+        centroid_lng: fallback.centroid_lng,
+        current_risk_level: fallback.default_risk_level,
+        risk_score: 30,
+        threshold_e_mm: fallback.threshold_e_mm,
+      };
+    }
+  }
+
+  if (!zoneData) {
+    throw new Error(`Zone ${zoneId} not found in database or static catalog`);
+  }
+
+  try {
     const url =
       "https://api.open-meteo.com/v1/forecast" +
-      `?latitude=${zone.centroid_lat}&longitude=${zone.centroid_lng}` +
+      `?latitude=${zoneData.centroid_lat}&longitude=${zoneData.centroid_lng}` +
       "&daily=precipitation_sum&forecast_days=4&timezone=UTC";
 
     const res = await fetch(url);
@@ -294,15 +335,15 @@ export async function getZoneWeatherForecastProjection(
     const day3 = precip[3] ?? 0;
 
     const projection = projectZoneRiskForecast({
-      zoneId: zone.id,
-      zoneName: zone.zone_name,
-      district: zone.district,
-      state: zone.state,
-      currentRiskLevel: (zone.current_risk_level as RiskLevel) ?? "UNKNOWN",
-      currentRiskScore: zone.risk_score ?? 0,
-      threshold_e_mm: zone.threshold_e_mm,
-      threshold_i_coefficient: (zone as any).threshold_i_coefficient,
-      threshold_i_exponent: (zone as any).threshold_i_exponent,
+      zoneId: zoneData.id,
+      zoneName: zoneData.zone_name,
+      district: zoneData.district,
+      state: zoneData.state,
+      currentRiskLevel: (zoneData.current_risk_level as RiskLevel) ?? "UNKNOWN",
+      currentRiskScore: zoneData.risk_score ?? 0,
+      threshold_e_mm: zoneData.threshold_e_mm,
+      threshold_i_coefficient: (zoneData as any).threshold_i_coefficient,
+      threshold_i_exponent: (zoneData as any).threshold_i_exponent,
       forecast_24h_mm: day1,
       forecast_48h_mm: day1 + day2,
       forecast_72h_mm: day1 + day2 + day3,
