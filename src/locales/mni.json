@@ -43,7 +43,9 @@
     "report_observation_for_zone": "+ {{zone}} গীদমক পাও থাগৎপা",
     "ml_risk": "ML খুদোংথিবা",
     "residents": "মীশিং",
-    "mean_slope": "ময়াই ওইবা চিংশিং"
+    "mean_slope": "ময়াই ওইবা চিংশিং",
+    "calculate_risk": "খুদোংথিবা লেপপা",
+    "calculating_risk": "খুদোংথিবা লেপ্লি..."
   },
   "risk_levels": {
     "Low": "নেম্বা",

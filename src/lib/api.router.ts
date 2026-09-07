@@ -876,7 +876,7 @@ export async function handleApiRequest(request: Request): Promise<Response | nul
 
     // 7a. Field Observation Status & Capability Flag
     if (pathname === "/api/field-observations/status" && request.method === "GET") {
-      const isTestEnv = process.env.NODE_ENV === "test" || process.env.VITEST === "true";
+      const isTestEnv = process.env["NODE_ENV"] === "test" || process.env["VITEST"] === "true";
       const mediaUploadEnabled = isTestEnv
         ? process.env["MEDIA_UPLOAD_ENABLED"] !== "false"
         : process.env["MEDIA_UPLOAD_ENABLED"] === "true" ||
@@ -904,7 +904,7 @@ export async function handleApiRequest(request: Request): Promise<Response | nul
         );
       }
 
-      const isTestEnv = process.env.NODE_ENV === "test" || process.env.VITEST === "true";
+      const isTestEnv = process.env["NODE_ENV"] === "test" || process.env["VITEST"] === "true";
       const mediaUploadEnabled = isTestEnv
         ? process.env["MEDIA_UPLOAD_ENABLED"] !== "false"
         : process.env["MEDIA_UPLOAD_ENABLED"] === "true" ||

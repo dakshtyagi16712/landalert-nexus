@@ -43,7 +43,9 @@
     "report_observation_for_zone": "A·chik + Report Observation for {{zone}}",
     "ml_risk": "A·chik ML Risk",
     "residents": "A·chik residents",
-    "mean_slope": "A·chik mean slope"
+    "mean_slope": "A·chik mean slope",
+    "calculate_risk": "Kenani hisap dako",
+    "calculating_risk": "Kenani hisap dakeenga..."
   },
   "risk_levels": {
     "Low": "Komigipa",

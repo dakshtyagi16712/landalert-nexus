@@ -43,7 +43,9 @@
     "report_observation_for_zone": "+ {{zone}} के लिए अवलोकन दर्ज करें",
     "ml_risk": "एमएल जोखिम",
     "residents": "निवासी",
-    "mean_slope": "औसत ढलान"
+    "mean_slope": "औसत ढलान",
+    "calculate_risk": "जोखिम की गणना करें",
+    "calculating_risk": "जोखिम की गणना हो रही है..."
   },
   "risk_levels": {
     "Low": "कम",

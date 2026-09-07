@@ -43,7 +43,9 @@
     "report_observation_for_zone": "Mizo + Report Observation for {{zone}}",
     "ml_risk": "Mizo ML Risk",
     "residents": "Mizo residents",
-    "mean_slope": "Mizo mean slope"
+    "mean_slope": "Mizo mean slope",
+    "calculate_risk": "Hlauhawm chhut rawh",
+    "calculating_risk": "Hlauhawm chhut mek a ni..."
   },
   "risk_levels": {
     "Low": "Hlauhawm loh",

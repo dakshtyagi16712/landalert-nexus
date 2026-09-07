@@ -43,7 +43,9 @@
     "report_observation_for_zone": "Khasi + Report Observation for {{zone}}",
     "ml_risk": "Khasi ML Risk",
     "residents": "Khasi residents",
-    "mean_slope": "Khasi mean slope"
+    "mean_slope": "Khasi mean slope",
+    "calculate_risk": "Khein ia ka jingmaham",
+    "calculating_risk": "Dang khein ia ka jingmaham..."
   },
   "risk_levels": {
     "Low": "Rit ka jingma",

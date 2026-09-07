@@ -494,6 +494,29 @@ function Dashboard() {
     return [...queuedObs, ...syncedObs, ...serverObs].slice(0, 8);
   }, [data, queueUpdateSignal]);
 
+  async function runCalculateRisk() {
+    setBusy(true);
+    setActionNotice(null);
+    try {
+      let weatherMsg = "";
+      try {
+        const res = await ingest();
+        weatherMsg = `Weather updated for ${res.zones} zones. `;
+      } catch {
+        weatherMsg = "Live weather unavailable (using cached dataset). ";
+      }
+      await recompute();
+      await qc.invalidateQueries();
+      setActionNotice(`${weatherMsg}Risk scores calculated successfully.`);
+      setTimeout(() => setActionNotice(null), 4000);
+    } catch {
+      setActionNotice("Failed to calculate risk scores. Please try again.");
+      setTimeout(() => setActionNotice(null), 5000);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function runRecompute() {
     setBusy(true);
     setActionNotice(null);
@@ -1156,24 +1179,18 @@ function Dashboard() {
                       />
                     </div>
 
-                    <div className="flex gap-2">
+                    <div>
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={runIngest}
+                        onClick={runCalculateRisk}
                         disabled={busy}
-                        className="flex-1 text-[0.7rem] font-mono"
+                        className="w-full text-[0.75rem] font-mono font-medium py-2 flex items-center justify-center gap-1.5"
                       >
-                        {t("dashboard.ingest_weather", "Ingest Weather")}
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={runRecompute}
-                        disabled={busy}
-                        className="flex-1 text-[0.7rem] font-mono"
-                      >
-                        {t("dashboard.recompute", "Recompute")}
+                        <RotateCw className={`h-3.5 w-3.5 ${busy ? "animate-spin" : ""}`} />
+                        {busy
+                          ? t("dashboard.calculating_risk", "Calculating Risk...")
+                          : t("dashboard.calculate_risk", "Calculate Risk")}
                       </Button>
                     </div>
                   </div>
