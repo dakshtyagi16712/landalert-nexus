@@ -10,6 +10,7 @@
 
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { zonePolygon } from "./risk";
+import { extractReportType, evaluateObservationsForLocalsEscalation } from "./locals-escalation.service";
 
 export interface FieldObservationInput {
   zone_id: number;
@@ -42,6 +43,7 @@ export interface FieldObservationInput {
   submitter_role?: string | undefined;
   // Note: initial status is set server-side based on submitter_role.
   review_status?: ("PENDING_REVIEW" | "APPROVED" | "REJECTED") | undefined;
+  report_type?: ("crack" | "slope_movement" | "road_blocked" | "other") | undefined;
   retry_count?: number | undefined;
   queue_status?: ("PENDING" | "SYNCING" | "FAILED" | "SYNCHRONIZED") | undefined;
   last_error?: string | undefined;
@@ -213,6 +215,12 @@ export async function syncFieldObservations(records: FieldObservationInput[]): P
       : "PENDING_VERIFICATION";
     const source = isOfficial ? "OFFICIAL_SURVEY" : "PUBLIC_REPORT";
 
+    const reportType = r.report_type ?? extractReportType({
+      report_type: r.report_type,
+      visual_signs: r.visual_signs,
+      road_status: r.road_status,
+    });
+
     validRows.push({
       zone_id: parsedZone,
       observed_at: new Date(r.observed_at).toISOString(),
@@ -221,6 +229,7 @@ export async function syncFieldObservations(records: FieldObservationInput[]): P
       soil_condition: r.soil_condition ?? null,
       visual_signs: r.visual_signs ?? null,
       road_status: r.road_status ?? null,
+      report_type: reportType,
       observer_id: r.observer_id.trim(),
       idempotency_key: key,
       status,
@@ -417,6 +426,17 @@ export async function syncFieldObservations(records: FieldObservationInput[]): P
       );
     }
     throw new Error(`Failed to sync field observations: ${errMessage}`);
+  }
+
+  // Trigger LOCALS auto-escalation evaluation for synchronized pending observations
+  if (validRows.length > 0) {
+    try {
+      await evaluateObservationsForLocalsEscalation(validRows as any).catch((err) =>
+        console.warn("[LOCALS Escalation Evaluation Notice]", err?.message || err),
+      );
+    } catch {
+      // Non-blocking escalation
+    }
   }
 
   return {

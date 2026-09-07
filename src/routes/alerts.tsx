@@ -8,6 +8,8 @@ import { PanelSkeleton, RouteError } from "@/components/ConsoleShell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { supabase } from "@/integrations/supabase/client";
+import { LocalsAlertsPanel } from "@/components/LocalsAlertsPanel";
+import { getUserAuthorizationState } from "@/lib/auth-domains";
 import {
   Dialog,
   DialogContent,
@@ -128,6 +130,29 @@ function AlertsPage() {
       }
     }
   }, [navigate]);
+
+  const [session, setSession] = useState<any>(null);
+  const [userRole, setUserRole] = useState<string>("PUBLIC_USER");
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      if (session?.user) {
+        const state = getUserAuthorizationState(session.user);
+        setUserRole(state.role);
+      }
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+      if (session?.user) {
+        const state = getUserAuthorizationState(session.user);
+        setUserRole(state.role);
+      } else {
+        setUserRole("PUBLIC_USER");
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, []);
 
   // Alert dispatch modal state
   const [openDispatch, setOpenDispatch] = useState(false);
@@ -368,6 +393,14 @@ function AlertsPage() {
         </Dialog>
       </div>
 
+      <div className="mt-6">
+        <LocalsAlertsPanel
+          zones={data.zones}
+          viewerRole={userRole}
+          accessToken={session?.access_token}
+          onSelectZone={(zid) => setSelectedZoneFilter(String(zid))}
+        />
+      </div>
 
       <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-y border-border/60 py-3">
         <div className="flex flex-wrap items-center gap-2">

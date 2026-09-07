@@ -429,6 +429,7 @@ export type Database = {
           geo_captured_at: string | null;
           consent_given: boolean;
           review_status: "PENDING_REVIEW" | "APPROVED" | "REJECTED";
+          report_type?: "crack" | "slope_movement" | "road_blocked" | "other" | null;
         };
         Insert: {
           client_timestamp?: string;
@@ -438,6 +439,7 @@ export type Database = {
           observer_id?: string;
           rainfall_mm?: number | null;
           road_status?: "open" | "restricted" | "blocked" | "unknown" | null;
+          report_type?: "crack" | "slope_movement" | "road_blocked" | "other" | null;
           soil_condition?: string | null;
           sync_status?: "pending" | "synced" | "conflict";
           synced_at?: string;
@@ -593,6 +595,60 @@ export type Database = {
           result?: string;
           details?: Json;
           reason?: string | null;
+        };
+        Relationships: [];
+      };
+      locals_alerts: {
+        Row: {
+          id: number;
+          report_type: "crack" | "slope_movement" | "road_blocked" | "other";
+          center_lat: number | null;
+          center_lng: number | null;
+          observation_count: number;
+          triggering_observation_ids: number[];
+          zone_ids_involved: number[];
+          detection_method: "gps_proximity" | "zone_fallback";
+          first_observed_at: string;
+          triggered_at: string;
+          status: "ACTIVE" | "RESOLVED" | "DISMISSED";
+          resolved_by: string | null;
+          resolved_at: string | null;
+          resolution_note: string | null;
+          resolution_action: "CONFIRMED_HAZARD" | "FALSE_PATTERN" | null;
+        };
+        Insert: {
+          id?: number;
+          report_type: "crack" | "slope_movement" | "road_blocked" | "other";
+          center_lat?: number | null;
+          center_lng?: number | null;
+          observation_count: number;
+          triggering_observation_ids?: number[];
+          zone_ids_involved?: number[];
+          detection_method: "gps_proximity" | "zone_fallback";
+          first_observed_at: string;
+          triggered_at?: string;
+          status?: "ACTIVE" | "RESOLVED" | "DISMISSED";
+          resolved_by?: string | null;
+          resolved_at?: string | null;
+          resolution_note?: string | null;
+          resolution_action?: "CONFIRMED_HAZARD" | "FALSE_PATTERN" | null;
+        };
+        Update: {
+          id?: number;
+          report_type?: "crack" | "slope_movement" | "road_blocked" | "other";
+          center_lat?: number | null;
+          center_lng?: number | null;
+          observation_count?: number;
+          triggering_observation_ids?: number[];
+          zone_ids_involved?: number[];
+          detection_method?: "gps_proximity" | "zone_fallback";
+          first_observed_at?: string;
+          triggered_at?: string;
+          status?: "ACTIVE" | "RESOLVED" | "DISMISSED";
+          resolved_by?: string | null;
+          resolved_at?: string | null;
+          resolution_note?: string | null;
+          resolution_action?: "CONFIRMED_HAZARD" | "FALSE_PATTERN" | null;
         };
         Relationships: [];
       };

@@ -25,6 +25,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { getUserAuthorizationState } from "@/lib/auth-domains";
 import { Camera as CapCamera, CameraResultType, CameraSource } from "@capacitor/camera";
 import { useUserLocation } from "@/hooks/useUserLocation";
+import { extractReportType } from "@/lib/locals-escalation.service";
 import { useTranslation } from "react-i18next";
 
 interface Props {
@@ -526,6 +527,7 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
       soil_condition: soilCondition,
       visual_signs: visualSigns === "None" ? undefined : visualSigns,
       road_status: roadStatus,
+      report_type: extractReportType({ visual_signs: visualSigns, road_status: roadStatus }),
       observer_id: observerId.trim() || "citizen_observer",
       media_urls: uploadedUrls.filter((u) => !u.startsWith("data:") && !u.startsWith("offline_")),
       media_metadata: mediaMeta,
