@@ -35,7 +35,7 @@ import {
 } from "@/lib/observation-status";
 import type { AppUserRole } from "@/lib/auth-domains";
 import { sanitizeObservationRecord, sanitizeObservationList } from "@/lib/observation-sanitizer";
-import { getOfflineMedia } from "@/lib/offline-media-store";
+import { getOfflineMedia, getOfflineMediaByName } from "@/lib/offline-media-store";
 import { getLocalizedZoneName, getLocalizedDistrict, getLocalizedState } from "@/lib/geo-translations";
 
 interface Props {
@@ -113,13 +113,17 @@ export function ObservationDetailsDialog({
       const urls: Record<string, string> = {};
       const mediaList = (Array.isArray(activeObs.media_metadata) ? activeObs.media_metadata : []) as any[];
       for (const meta of mediaList) {
-        if (meta.id && !meta.url) {
+        if (!meta.url) {
           try {
-            const stored = await getOfflineMedia(meta.id);
+            let stored = meta.id ? await getOfflineMedia(meta.id) : null;
+            if (!stored && meta.name) {
+              stored = await getOfflineMediaByName(meta.name);
+            }
             if (stored && stored.blob) {
               const objUrl = URL.createObjectURL(stored.blob);
               createdBlobUrls.push(objUrl);
-              urls[meta.id] = objUrl;
+              if (meta.id) urls[meta.id] = objUrl;
+              if (meta.name) urls[meta.name] = objUrl;
             }
           } catch {
             // Ignore offline fetch errors
@@ -127,7 +131,7 @@ export function ObservationDetailsDialog({
         }
       }
       if (isMounted) {
-        setResolvedOfflineUrls(urls);
+        setResolvedOfflineUrls((prev) => ({ ...prev, ...urls }));
       }
     };
 
@@ -137,7 +141,7 @@ export function ObservationDetailsDialog({
       isMounted = false;
       createdBlobUrls.forEach((u) => URL.revokeObjectURL(u));
     };
-  }, [activeObs]);
+  }, [activeObs?.id, activeObs?.visual_signs]);
 
   const filteredObservations = useMemo(() => {
     return sanitizedObservations.filter((obs) => {
@@ -487,8 +491,22 @@ export function ObservationDetailsDialog({
                 });
 
                 mediaMeta.forEach((m: any, i: number) => {
-                  const resolvedUrl = m.id ? resolvedOfflineUrls[m.id] : undefined;
-                  const itemUrl = m.url || resolvedUrl;
+                  const resolvedUrl =
+                    (m.id ? resolvedOfflineUrls[m.id] : undefined) ||
+                    (m.name ? resolvedOfflineUrls[m.name] : undefined);
+
+                  // Construct public Supabase storage fallback URL if available
+                  const publicStorageFallback =
+                    m.url ||
+                    resolvedUrl ||
+                    (m.storagePath
+                      ? `https://shkpwbqcbeqlybdrhczq.supabase.co/storage/v1/object/public/field-observation-media/${m.storagePath}`
+                      : undefined) ||
+                    (m.name && !m.name.startsWith("offline_")
+                      ? `https://shkpwbqcbeqlybdrhczq.supabase.co/storage/v1/object/public/field-observation-media/observations/${m.name}`
+                      : undefined);
+
+                  const itemUrl = publicStorageFallback;
                   // Avoid duplicate if already represented in items
                   if (itemUrl && items.some((it) => it.url === itemUrl)) return;
                   items.push({
@@ -526,6 +544,8 @@ export function ObservationDetailsDialog({
                             item.name?.endsWith(".mov") ||
                             (item.name?.endsWith(".webm") && Boolean(item.mimeType?.startsWith("video/"))));
 
+                        const isImg = !isAudio && !isVideo;
+
                         if (item.url) {
                           if (isAudio) {
                             return (
@@ -559,7 +579,11 @@ export function ObservationDetailsDialog({
                               <img
                                 src={item.url}
                                 alt={item.name}
-                                className="h-32 w-full object-cover group-hover:scale-102 transition-transform"
+                                className="h-36 w-full object-cover group-hover:scale-102 transition-transform"
+                                onError={(e) => {
+                                  // Fallback gracefully on image load error
+                                  (e.target as HTMLElement).style.display = "none";
+                                }}
                               />
                               <div className="p-1.5 text-[0.65rem] text-muted-foreground truncate font-mono">
                                 {item.name}
@@ -572,20 +596,45 @@ export function ObservationDetailsDialog({
                         return (
                           <div
                             key={item.key}
-                            className="rounded border border-border/80 bg-secondary/30 p-2.5 flex items-center gap-2.5"
+                            className="rounded border border-border/80 bg-secondary/30 p-2.5 flex flex-col gap-2"
                           >
-                            <div className="p-2 rounded bg-primary/10 text-primary shrink-0">
-                              {isAudio ? <Volume2 className="h-4 w-4" /> : isVideo ? <VideoIcon className="h-4 w-4" /> : <ImageIcon className="h-4 w-4" />}
-                            </div>
-                            <div className="min-w-0 flex-1">
-                              <div className="text-xs font-semibold text-foreground truncate">{item.name}</div>
-                              <div className="text-[0.65rem] text-muted-foreground flex items-center gap-1.5 mt-0.5">
-                                <span>{item.size ? `${(item.size / 1024 / 1024).toFixed(2)} MB` : "Field File"}</span>
-                                <span className="text-primary font-medium">
-                                  • {isAudio ? "Offline Audio" : isVideo ? "Offline Video" : "Offline Photo"}
-                                </span>
+                            <div className="flex items-center gap-2.5">
+                              <div className="p-2 rounded bg-primary/10 text-primary shrink-0">
+                                {isAudio ? <Volume2 className="h-4 w-4" /> : isVideo ? <VideoIcon className="h-4 w-4" /> : <ImageIcon className="h-4 w-4" />}
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <div className="text-xs font-semibold text-foreground truncate">{item.name}</div>
+                                <div className="text-[0.65rem] text-muted-foreground flex items-center gap-1.5 mt-0.5">
+                                  <span>{item.size ? `${(item.size / 1024 / 1024).toFixed(2)} MB` : "Field File"}</span>
+                                  <span className="text-primary font-medium">
+                                    • {isAudio ? "Offline Audio" : isVideo ? "Offline Video" : "Offline Photo"}
+                                  </span>
+                                </div>
                               </div>
                             </div>
+
+                            {/* Action to view / load offline media */}
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                const targetId = item.key || item.name;
+                                if (targetId) {
+                                  const stored = (await getOfflineMedia(targetId)) || (item.name ? await getOfflineMediaByName(item.name) : null);
+                                  if (stored && stored.blob) {
+                                    const u = URL.createObjectURL(stored.blob);
+                                    setResolvedOfflineUrls((prev) => ({
+                                      ...prev,
+                                      [targetId]: u,
+                                      ...(item.name ? { [item.name]: u } : {}),
+                                    }));
+                                  }
+                                }
+                              }}
+                              className="py-1 px-2 text-[0.65rem] font-mono text-primary bg-primary/10 hover:bg-primary/20 rounded border border-primary/20 flex items-center justify-center gap-1 cursor-pointer transition-colors"
+                            >
+                              <Eye className="h-3 w-3" />
+                              <span>{isImg ? "View Cached Photo" : isVideo ? "Play Cached Video" : "Listen to Cached Audio"}</span>
+                            </button>
                           </div>
                         );
                       })}

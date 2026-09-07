@@ -1022,10 +1022,13 @@ export async function handleApiRequest(request: Request): Promise<Response | nul
           });
 
         if (!uploadErr && uploadData) {
+          const { data: pubData } = supabaseAdmin.storage
+            .from("field-observation-media")
+            .getPublicUrl(storagePath);
           const { data: signedData } = await supabaseAdmin.storage
             .from("field-observation-media")
             .createSignedUrl(storagePath, 60 * 60 * 24 * 365); // 1 year
-          fileUrl = signedData?.signedUrl || `/api/field-observations/media/${storagePath}`;
+          fileUrl = pubData?.publicUrl || signedData?.signedUrl || `/api/field-observations/media/${storagePath}`;
         }
       } catch {
         // Storage cloud fallback below

@@ -87,6 +87,13 @@ export async function saveOfflineMedia(
       u8arr[n] = bstr.charCodeAt(n);
     }
     blob = new Blob([u8arr], { type: mime });
+  } else if (typeof data === "string" && data.startsWith("blob:")) {
+    try {
+      const res = await fetch(data);
+      blob = await res.blob();
+    } catch {
+      blob = new Blob([data], { type: meta.mimeType });
+    }
   } else {
     blob = new Blob([data], { type: meta.mimeType });
   }
@@ -152,6 +159,43 @@ export async function getOfflineMedia(id: string): Promise<StoredOfflineMedia | 
       req.onerror = () => {
         resolve(null);
       };
+      tx.oncomplete = () => db.close();
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+/**
+ * Retrieves a media file from IndexedDB by filename.
+ */
+export async function getOfflineMediaByName(name: string): Promise<StoredOfflineMedia | null> {
+  for (const item of memoryMediaMap.values()) {
+    if (item.name === name) return item;
+  }
+
+  const db = await openDatabase();
+  if (!db) return null;
+
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction(STORE_NAME, "readonly");
+      const store = tx.objectStore(STORE_NAME);
+      const req = store.openCursor();
+
+      req.onsuccess = (e: any) => {
+        const cursor = e.target.result;
+        if (cursor) {
+          if (cursor.value && (cursor.value.name === name || cursor.value.id === name)) {
+            resolve(cursor.value);
+            return;
+          }
+          cursor.continue();
+        } else {
+          resolve(null);
+        }
+      };
+      req.onerror = () => resolve(null);
       tx.oncomplete = () => db.close();
     } catch {
       resolve(null);

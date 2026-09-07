@@ -540,11 +540,19 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
           // Store in IndexedDB for resilient offline queue
           const { saveOfflineMedia } = await import("@/lib/offline-media-store");
           const mediaId = `offline_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-          await saveOfflineMedia(mediaId, item.file || item.base64Data || item.previewUrl, {
+          const payload = item.file || item.base64Data || item.previewUrl;
+          await saveOfflineMedia(mediaId, payload, {
             name: item.name,
             mimeType: item.mimeType,
             size: item.size,
           });
+          if (item.name) {
+            await saveOfflineMedia(item.name, payload, {
+              name: item.name,
+              mimeType: item.mimeType,
+              size: item.size,
+            });
+          }
           mediaMeta.push({
             id: mediaId,
             name: item.name,
@@ -558,11 +566,19 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
       const { saveOfflineMedia } = await import("@/lib/offline-media-store");
       for (const item of mediaList) {
         const mediaId = `offline_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-        await saveOfflineMedia(mediaId, item.file || item.base64Data || item.previewUrl, {
+        const payload = item.file || item.base64Data || item.previewUrl;
+        await saveOfflineMedia(mediaId, payload, {
           name: item.name,
           mimeType: item.mimeType,
           size: item.size,
         });
+        if (item.name) {
+          await saveOfflineMedia(item.name, payload, {
+            name: item.name,
+            mimeType: item.mimeType,
+            size: item.size,
+          });
+        }
         mediaMeta.push({
           id: mediaId,
           name: item.name,

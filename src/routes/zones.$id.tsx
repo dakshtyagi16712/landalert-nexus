@@ -1325,49 +1325,74 @@ function ZonePage() {
                   );
                 })()}
 
-                {obs.media_urls && obs.media_urls.length > 0 && (
-                  <div>
-                    {canViewMedia ? (
-                      <div className="flex flex-wrap gap-3 mt-2">
-                        {obs.media_urls.map((url: string, idx: number) => {
-                          const isAudio =
-                            url.endsWith(".mp3") ||
-                            url.endsWith(".wav") ||
-                            url.endsWith(".ogg") ||
-                            url.endsWith(".m4a") ||
-                            url.includes("voice_memo") ||
-                            url.includes("audio");
-                          const isVideo =
-                            !isAudio &&
-                            (url.endsWith(".mp4") || url.endsWith(".mov") || url.includes("video"));
+                {(() => {
+                  const urls: string[] = [...(obs.media_urls || [])];
+                  if (Array.isArray(obs.media_metadata)) {
+                    obs.media_metadata.forEach((m: any) => {
+                      const u =
+                        m.url ||
+                        (m.storagePath
+                          ? `https://shkpwbqcbeqlybdrhczq.supabase.co/storage/v1/object/public/field-observation-media/${m.storagePath}`
+                          : undefined);
+                      if (u && !urls.includes(u)) {
+                        urls.push(u);
+                      }
+                    });
+                  }
 
-                          return (
-                            <div key={idx} className="relative rounded overflow-hidden border border-border bg-black/40 p-1 flex items-center justify-center min-w-[140px]">
-                              {isAudio ? (
-                                <div className="p-2 flex flex-col gap-1 w-full bg-secondary/30 rounded">
-                                  <span className="text-[0.65rem] text-muted-foreground font-mono flex items-center gap-1">
-                                    🎙️ Voice Note {idx + 1}
-                                  </span>
-                                  <audio src={url} controls className="w-48 h-8" />
-                                </div>
-                              ) : isVideo ? (
-                                <video src={url} controls className="h-24 w-36 object-contain" />
-                              ) : (
-                                <a href={url} target="_blank" rel="noopener noreferrer" className="block h-24 w-36">
-                                  <img src={url} alt={`Observation media ${idx + 1}`} className="h-full w-full object-cover hover:scale-105 transition-transform" />
-                                </a>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <div className="rounded bg-secondary/30 p-2 text-xs font-mono text-muted-foreground border border-border/50 mt-2">
-                        {t("zone_detail.media_quarantined")}
-                      </div>
-                    )}
-                  </div>
-                )}
+                  if (urls.length === 0) return null;
+
+                  return (
+                    <div>
+                      {canViewMedia ? (
+                        <div className="flex flex-wrap gap-3 mt-2">
+                          {urls.map((url: string, idx: number) => {
+                            const isAudio =
+                              url.endsWith(".mp3") ||
+                              url.endsWith(".wav") ||
+                              url.endsWith(".ogg") ||
+                              url.endsWith(".m4a") ||
+                              url.includes("voice_memo") ||
+                              url.includes("audio");
+                            const isVideo =
+                              !isAudio &&
+                              (url.endsWith(".mp4") || url.endsWith(".mov") || url.includes("video"));
+
+                            return (
+                              <div key={idx} className="relative rounded overflow-hidden border border-border bg-black/40 p-1 flex items-center justify-center min-w-[140px]">
+                                {isAudio ? (
+                                  <div className="p-2 flex flex-col gap-1 w-full bg-secondary/30 rounded">
+                                    <span className="text-[0.65rem] text-muted-foreground font-mono flex items-center gap-1">
+                                      🎙️ Voice Note {idx + 1}
+                                    </span>
+                                    <audio src={url} controls className="w-48 h-8" />
+                                  </div>
+                                ) : isVideo ? (
+                                  <video src={url} controls className="h-24 w-36 object-contain" />
+                                ) : (
+                                  <a href={url} target="_blank" rel="noopener noreferrer" className="block h-24 w-36">
+                                    <img
+                                      src={url}
+                                      alt={`Observation media ${idx + 1}`}
+                                      className="h-full w-full object-cover hover:scale-105 transition-transform"
+                                      onError={(e) => {
+                                        (e.target as HTMLElement).style.display = "none";
+                                      }}
+                                    />
+                                  </a>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="rounded bg-secondary/30 p-2 text-xs font-mono text-muted-foreground border border-border/50 mt-2">
+                          {t("zone_detail.media_quarantined")}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             );
           })}
