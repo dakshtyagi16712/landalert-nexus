@@ -68,6 +68,7 @@ import { getOfflineOverviewFallback, getQueuedObservations } from "@/lib/offline
 
 const overviewQuery = queryOptions({
   queryKey: ["overview"],
+  networkMode: "always",
   queryFn: async () => {
     try {
       return await getOverview();

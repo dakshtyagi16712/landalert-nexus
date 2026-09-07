@@ -16,7 +16,7 @@ import {
   useConnectivityStatus,
 } from "@/lib/offline-manager";
 import type { FieldObservationInput } from "@/lib/sync.service";
-import { FALLBACK_ZONES } from "./FieldObservationDialog";
+import { FieldObservationDialog, FALLBACK_ZONES } from "./FieldObservationDialog";
 import {
   RefreshCw,
   AlertCircle,
@@ -327,6 +327,20 @@ export function SyncQueueDialog({
           </div>
 
           <div className="flex items-center gap-2">
+            <FieldObservationDialog
+              trigger={
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="text-xs h-8 border-primary text-primary hover:bg-primary/10 font-semibold"
+                >
+                  + {t("field_observation.button_label", "Report Observation")}
+                </Button>
+              }
+              onSuccess={() => reloadItems()}
+            />
+
             <Button
               type="button"
               variant="outline"

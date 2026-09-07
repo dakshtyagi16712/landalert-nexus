@@ -9,6 +9,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { useTranslation } from "react-i18next";
 import { SyncQueueDialog } from "./SyncQueueDialog";
+import { FieldObservationDialog } from "./FieldObservationDialog";
 
 export function OfflineBanner() {
   const { t } = useTranslation();
@@ -98,6 +99,17 @@ export function OfflineBanner() {
         </div>
 
         <div className="flex items-center gap-2">
+          <FieldObservationDialog
+            trigger={
+              <Button
+                size="sm"
+                className="h-7 px-2.5 text-[0.68rem] font-mono uppercase bg-primary text-primary-foreground hover:bg-primary/90 font-semibold cursor-pointer"
+              >
+                + {t("field_observation.button_label", "Report Observation")}
+              </Button>
+            }
+          />
+
           <Button
             size="sm"
             variant="outline"

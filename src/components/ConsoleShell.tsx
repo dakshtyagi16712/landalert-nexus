@@ -440,11 +440,21 @@ export function RouteError({ error, reset }: { error: Error; reset?: () => void 
         {t("console.monitoring_unavailable", "Monitoring data could not be loaded")}
       </h1>
       <p className="mt-2 text-xs text-muted-foreground">{error.message}</p>
-      <div className="mt-6 flex justify-center gap-2">
+      <div className="mt-6 flex flex-wrap justify-center items-center gap-2">
+        <FieldObservationDialog
+          trigger={
+            <button
+              type="button"
+              className="rounded bg-primary text-primary-foreground hover:bg-primary/90 px-4 py-2 text-xs font-medium transition-colors cursor-pointer font-mono uppercase tracking-wider"
+            >
+              + {t("field_observation.button_label", "Report Observation")}
+            </button>
+          }
+        />
         {reset && (
           <button
             onClick={reset}
-            className="rounded border border-primary/50 bg-primary/10 px-4 py-2 text-xs font-medium text-primary hover:bg-primary/20 transition-colors"
+            className="rounded border border-primary/50 bg-primary/10 px-4 py-2 text-xs font-medium text-primary hover:bg-primary/20 transition-colors cursor-pointer"
           >
             {t("console.retry", "Retry")}
           </button>

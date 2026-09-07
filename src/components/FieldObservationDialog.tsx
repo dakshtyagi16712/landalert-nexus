@@ -172,8 +172,11 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
   const [gpsZoneMessage, setGpsZoneMessage] = useState<string | null>(null);
 
   const currentDistrictZones = useMemo(() => {
-    return getZonesByDistrict(selectedDistrict);
-  }, [selectedDistrict]);
+    const list = getZonesByDistrict(selectedDistrict);
+    if (list.length > 0) return list;
+    const stateZones = getAllZones().filter((z) => z.state.toLowerCase() === selectedState.toLowerCase());
+    return stateZones.length > 0 ? stateZones : getAllZones();
+  }, [selectedDistrict, selectedState]);
 
   const handleStateChange = (newState: string) => {
     setSelectedState(newState);
@@ -181,7 +184,12 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
     const firstDistrict = districts[0]?.name || "";
     setSelectedDistrict(firstDistrict);
     const districtZones = getZonesByDistrict(firstDistrict);
-    setZoneId(districtZones.length > 0 ? districtZones[0]!.id : null);
+    if (districtZones.length > 0) {
+      setZoneId(districtZones[0]!.id);
+    } else {
+      const stateZones = getAllZones().filter((z) => z.state.toLowerCase() === newState.toLowerCase());
+      setZoneId(stateZones.length > 0 ? stateZones[0]!.id : 1);
+    }
     setGpsZoneMessage(null);
     setFieldErrors((prev) => ({ ...prev, zone: undefined as string | undefined, general: undefined as string | undefined }));
   };
@@ -189,7 +197,12 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
   const handleDistrictChange = (newDistrict: string) => {
     setSelectedDistrict(newDistrict);
     const districtZones = getZonesByDistrict(newDistrict);
-    setZoneId(districtZones.length > 0 ? districtZones[0]!.id : null);
+    if (districtZones.length > 0) {
+      setZoneId(districtZones[0]!.id);
+    } else {
+      const stateZones = getAllZones().filter((z) => z.state.toLowerCase() === selectedState.toLowerCase());
+      setZoneId(stateZones.length > 0 ? stateZones[0]!.id : 1);
+    }
     setGpsZoneMessage(null);
     setFieldErrors((prev) => ({ ...prev, zone: undefined as string | undefined, general: undefined as string | undefined }));
   };
@@ -392,12 +405,13 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
 
     const hasRain = rainfallMm.trim() !== "" && !isNaN(Number(rainfallMm));
     const hasSigns = visualSigns !== "None";
-    const hasRoad = roadStatus !== "open";
+    const hasRoad = Boolean(roadStatus);
+    const hasSoil = Boolean(soilCondition);
     const hasMedia = mediaList.length > 0;
     const hasGeo = geoLat !== null;
 
-    if (!hasRain && !hasSigns && !hasRoad && !hasMedia && !hasGeo) {
-      newErrors.general = t("field_observation.error_empty", "Empty observation: At least one field observation signal (rainfall mm, slope signs, road status, ground photo, or GPS reading) must be provided.");
+    if (!hasRain && !hasSigns && !hasRoad && !hasSoil && !hasMedia && !hasGeo) {
+      newErrors.general = t("field_observation.error_empty", "Empty observation: At least one field observation signal (rainfall mm, soil condition, slope signs, road status, ground photo, or GPS reading) must be provided.");
     }
 
     if (Object.keys(newErrors).length > 0) {

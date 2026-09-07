@@ -93,6 +93,7 @@ import { getZoneById } from "@/lib/geography";
 const zoneQuery = (id: number) =>
   queryOptions({
     queryKey: ["zone", id],
+    networkMode: "always",
     queryFn: async () => {
       try {
         return await getZoneDetail({ data: { id } });
