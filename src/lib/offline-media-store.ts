@@ -76,7 +76,16 @@ export async function saveOfflineMedia(
 ): Promise<void> {
   let blob: Blob;
   if (data instanceof Blob) {
-    blob = data;
+    if (typeof File !== "undefined" && data instanceof File) {
+      try {
+        const buf = await data.arrayBuffer();
+        blob = new Blob([buf], { type: data.type || meta.mimeType || "image/jpeg" });
+      } catch {
+        blob = data;
+      }
+    } else {
+      blob = data;
+    }
   } else if (typeof data === "string" && data.startsWith("data:")) {
     const parts = data.split(",");
     const mime = parts[0]?.match(/:(.*?);/)?.[1] || meta.mimeType || "application/octet-stream";
@@ -168,8 +177,9 @@ export async function getOfflineMedia(id: string): Promise<StoredOfflineMedia | 
  * Retrieves a media file from IndexedDB by filename.
  */
 export async function getOfflineMediaByName(name: string): Promise<StoredOfflineMedia | null> {
+  const targetLower = name.trim().toLowerCase();
   for (const item of memoryMediaMap.values()) {
-    if (item.name === name) return item;
+    if (item.name === name || item.name.toLowerCase() === targetLower) return item;
   }
 
   const db = await openDatabase();
@@ -184,7 +194,14 @@ export async function getOfflineMediaByName(name: string): Promise<StoredOffline
       req.onsuccess = (e: any) => {
         const cursor = e.target.result;
         if (cursor) {
-          if (cursor.value && (cursor.value.name === name || cursor.value.id === name)) {
+          const val = cursor.value;
+          if (
+            val &&
+            (val.name === name ||
+              val.id === name ||
+              val.name?.toLowerCase() === targetLower ||
+              val.id?.toLowerCase() === targetLower)
+          ) {
             resolve(cursor.value);
             return;
           }

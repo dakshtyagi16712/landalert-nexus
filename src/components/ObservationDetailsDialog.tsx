@@ -136,7 +136,9 @@ function AutoResolvingMediaItem({
   const isImg = !isAudio && !isVideo;
   const currentUrl = localBlobUrl || item.url;
 
-  if (currentUrl) {
+  const [imgError, setImgError] = useState(false);
+
+  if (currentUrl && !imgError) {
     if (isAudio) {
       return (
         <div className="rounded border border-border bg-secondary/30 p-2.5 flex flex-col gap-2">
@@ -169,6 +171,7 @@ function AutoResolvingMediaItem({
           <img
             src={currentUrl}
             alt={item.name}
+            onError={() => setImgError(true)}
             className="h-44 w-full object-cover group-hover:scale-102 transition-transform"
           />
         </a>
@@ -184,10 +187,10 @@ function AutoResolvingMediaItem({
   if (isImg) {
     return (
       <div className="rounded border border-border/80 bg-secondary/20 p-4 flex flex-col items-center justify-center gap-2 h-44 text-center">
-        <ImageIcon className="h-8 w-8 text-primary/60 animate-pulse" />
+        <ImageIcon className="h-8 w-8 text-primary/60" />
         <div className="text-xs font-medium text-foreground truncate max-w-[200px]">{item.name}</div>
         <div className="text-[0.65rem] text-muted-foreground font-mono">
-          {loading ? "Loading photo..." : "Field Evidence Photo"}
+          {loading ? "Loading photo..." : "Stored offline on reporting device"}
         </div>
       </div>
     );

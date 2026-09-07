@@ -335,7 +335,15 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
       return;
     }
 
-    const ALLOWED_IMAGE_MIMES = ["image/jpeg", "image/png", "image/webp", "image/heic"];
+    const ALLOWED_IMAGE_MIMES = [
+      "image/jpeg",
+      "image/jpg",
+      "image/pjpeg",
+      "image/jfif",
+      "image/png",
+      "image/webp",
+      "image/heic",
+    ];
     const ALLOWED_VIDEO_MIMES = ["video/mp4", "video/webm", "video/quicktime"];
 
     const newItems: MediaItem[] = [];
@@ -371,12 +379,17 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
         }
       }
 
+      const normalizedMime =
+        file.type === "image/jpg" || file.type === "image/pjpeg" || file.type === "image/jfif"
+          ? "image/jpeg"
+          : file.type || (isImg ? "image/jpeg" : "video/mp4");
+
       newItems.push({
         file,
         previewUrl: URL.createObjectURL(file),
         name: file.name,
         size: file.size,
-        mimeType: file.type || (isImg ? "image/jpeg" : "video/mp4"),
+        mimeType: normalizedMime,
         base64Data,
       });
     }
@@ -475,7 +488,7 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
     const uploadedUrls: string[] = [];
     const mediaMeta: Array<{ id?: string; name: string; size: number; mimeType: string; storagePath?: string; url?: string }> = [];
 
-    if (isOnline && connectivityState === "api_reachable" && mediaList.length > 0) {
+    if (isOnline && connectivityState !== "api_unavailable" && mediaList.length > 0) {
       let authHeaders: Record<string, string> = {};
       try {
         const session = await ensureAuthenticatedSession();
@@ -513,7 +526,11 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
         if (item.file) {
           try {
             const fd = new FormData();
-            fd.append("file", item.file);
+            const uploadBlob =
+              item.file instanceof Blob
+                ? item.file
+                : new Blob([item.file as any], { type: item.mimeType || "image/jpeg" });
+            fd.append("file", uploadBlob, item.name || "evidence.jpg");
             fd.append("zoneId", String(zoneId));
             const upRes = await fetch("/api/field-observations/upload", {
               method: "POST",

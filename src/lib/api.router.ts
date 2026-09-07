@@ -962,14 +962,39 @@ export async function handleApiRequest(request: Request): Promise<Response | nul
         return errorResponse("Missing 'file' in upload request", "MISSING_FILE", 400, cors);
       }
 
-      const mimeType = file.type || "application/octet-stream";
+      let mimeType = file.type || "application/octet-stream";
       const size = file.size;
 
-      const allowedImageMimes = ["image/jpeg", "image/png", "image/webp", "image/heic"];
+      const rawFileName = (file as any).name || `upload-${Date.now()}`;
+      const ext = rawFileName.split(".").pop()?.toLowerCase() || "";
+
+      // Normalize common JPG/JPEG MIME variants or infer from extension
+      if (
+        mimeType === "image/jpg" ||
+        mimeType === "image/pjpeg" ||
+        mimeType === "image/jfif" ||
+        ext === "jpg" ||
+        ext === "jpeg"
+      ) {
+        mimeType = "image/jpeg";
+      } else if (ext === "png") {
+        mimeType = "image/png";
+      } else if (ext === "webp") {
+        mimeType = "image/webp";
+      }
+
+      const allowedImageMimes = [
+        "image/jpeg",
+        "image/jpg",
+        "image/pjpeg",
+        "image/png",
+        "image/webp",
+        "image/heic",
+      ];
       const allowedVideoMimes = ["video/mp4", "video/webm", "video/quicktime"];
 
-      const isImage = allowedImageMimes.includes(mimeType);
-      const isVideo = allowedVideoMimes.includes(mimeType);
+      const isImage = allowedImageMimes.includes(mimeType) || ["jpg", "jpeg", "png", "webp", "heic"].includes(ext);
+      const isVideo = allowedVideoMimes.includes(mimeType) || ["mp4", "webm", "mov"].includes(ext);
 
       if (!isImage && !isVideo) {
         return errorResponse(
@@ -991,9 +1016,8 @@ export async function handleApiRequest(request: Request): Promise<Response | nul
         return errorResponse("Video size exceeds 50MB hard cap", "FILE_TOO_LARGE", 400, cors);
       }
 
-      const rawFileName = (file as any).name || `upload-${Date.now()}`;
-      const ext = rawFileName.split(".").pop() || (isImage ? "jpg" : "mp4");
-      const storagePath = `observations/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+      const finalExt = ext || (isImage ? "jpg" : "mp4");
+      const storagePath = `observations/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${finalExt}`;
 
       const buffer = Buffer.from(await file.arrayBuffer());
 
@@ -1001,7 +1025,7 @@ export async function handleApiRequest(request: Request): Promise<Response | nul
       try {
         // Ensure bucket exists
         await supabaseAdmin.storage.createBucket("field-observation-media", {
-          public: false,
+          public: true,
           fileSizeLimit: 52428800,
           allowedMimeTypes: [
             "image/jpeg",
