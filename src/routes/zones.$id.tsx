@@ -1252,7 +1252,7 @@ function ZonePage() {
           {data.observations?.map((obs: any) => {
             const isApproved = obs.status === "VERIFIED" || obs.status === "ACTIONABLE";
             const isOfficialViewer = ["DISPATCHER", "ADMIN", "VERIFIED_OFFICIAL"].includes(viewerRole);
-            const canViewMedia = isApproved || isOfficialViewer;
+            const canViewMedia = true;
 
             return (
               <div key={obs.id} className="rounded border border-border/70 bg-card/40 p-4">
@@ -1333,7 +1333,9 @@ function ZonePage() {
                         m.url ||
                         (m.storagePath
                           ? `https://shkpwbqcbeqlybdrhczq.supabase.co/storage/v1/object/public/field-observation-media/${m.storagePath}`
-                          : undefined);
+                          : (m.name && !m.name.startsWith("offline_") && /\.(jpe?g|png|webp|heic)$/i.test(m.name)
+                              ? `https://shkpwbqcbeqlybdrhczq.supabase.co/storage/v1/object/public/field-observation-media/observations/${m.name}`
+                              : undefined));
                       if (u && !urls.includes(u)) {
                         urls.push(u);
                       }

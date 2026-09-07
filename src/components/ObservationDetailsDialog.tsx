@@ -645,13 +645,14 @@ export function ObservationDetailsDialog({
                     (m.id ? resolvedOfflineUrls[m.id] : undefined) ||
                     (m.name ? resolvedOfflineUrls[m.name] : undefined);
 
-                  // Only use real uploaded URL, resolved IndexedDB blob, or verified storagePath
                   const itemUrl =
                     m.url ||
                     resolvedUrl ||
                     (m.storagePath
                       ? `https://shkpwbqcbeqlybdrhczq.supabase.co/storage/v1/object/public/field-observation-media/${m.storagePath}`
-                      : undefined);
+                      : (m.name && !m.name.startsWith("offline_") && /\.(jpe?g|png|webp|heic)$/i.test(m.name)
+                          ? `https://shkpwbqcbeqlybdrhczq.supabase.co/storage/v1/object/public/field-observation-media/observations/${m.name}`
+                          : undefined));
 
                   // Avoid duplicate if already represented in items
                   if (itemUrl && items.some((it) => it.url === itemUrl)) return;
