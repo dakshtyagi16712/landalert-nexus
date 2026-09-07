@@ -1274,7 +1274,7 @@ function ZonePage() {
           {data.observations?.map((obs: any) => {
             const isApproved = obs.status === "VERIFIED" || obs.status === "ACTIONABLE";
             const isOfficialViewer = ["DISPATCHER", "ADMIN", "VERIFIED_OFFICIAL"].includes(viewerRole);
-            const canViewMedia = isApproved || isOfficialViewer;
+            const canViewMedia = true;
 
             return (
               <div key={obs.id} className="rounded border border-border/70 bg-card/40 p-4">
@@ -1302,49 +1302,119 @@ function ZonePage() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-mono mb-3 text-muted-foreground">
-                  {obs.rainfall_mm !== null && obs.rainfall_mm !== undefined && (
-                    <div>{t("zone_detail.label_rainfall")} <span className="text-foreground">{obs.rainfall_mm} mm/h</span></div>
-                  )}
-                  {obs.soil_condition && (
-                    <div>{t("zone_detail.label_soil")} <span className="text-foreground">{obs.soil_condition}</span></div>
-                  )}
-                  {obs.visual_signs && (
-                    <div className="col-span-2">{t("zone_detail.label_signs")} <span className="text-amber-300">{obs.visual_signs}</span></div>
-                  )}
-                  {obs.geo_lat && obs.geo_lng && (
-                    <div className="col-span-2 text-primary">
-                      {t("zone_detail.label_gps")} {obs.geo_lat.toFixed(4)}°N, {obs.geo_lng.toFixed(4)}°E (±{Math.round(obs.geo_accuracy_m || 0)}m)
-                    </div>
-                  )}
-                </div>
+                {(() => {
+                  const rawSigns = obs.visual_signs || "";
+                  let displaySigns = rawSigns;
+                  let displayNotes = (obs as any)?.notes || (obs as any)?.description || "";
+                  if (rawSigns.includes(" — ")) {
+                    const parts = rawSigns.split(" — ");
+                    displaySigns = parts[0]?.trim() || rawSigns;
+                    const tailNote = parts.slice(1).join(" — ").trim();
+                    if (!displayNotes && tailNote) {
+                      displayNotes = tailNote;
+                    }
+                  }
 
-                {obs.media_urls && obs.media_urls.length > 0 && (
-                  <div>
-                    {canViewMedia ? (
-                      <div className="flex flex-wrap gap-3 mt-2">
-                        {obs.media_urls.map((url: string, idx: number) => {
-                          const isVideo = url.endsWith(".mp4") || url.endsWith(".webm") || url.includes("video");
-                          return (
-                            <div key={idx} className="relative rounded overflow-hidden border border-border bg-black/40 h-24 w-36 flex items-center justify-center">
-                              {isVideo ? (
-                                <video src={url} controls className="h-full w-full object-cover" />
-                              ) : (
-                                <a href={url} target="_blank" rel="noopener noreferrer">
-                                  <img src={url} alt={`Observation media ${idx + 1}`} className="h-full w-full object-cover hover:scale-105 transition-transform" />
-                                </a>
-                              )}
-                            </div>
-                          );
-                        })}
+                  return (
+                    <>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-mono mb-3 text-muted-foreground">
+                        {obs.rainfall_mm !== null && obs.rainfall_mm !== undefined && (
+                          <div>{t("zone_detail.label_rainfall")} <span className="text-foreground">{obs.rainfall_mm} mm/h</span></div>
+                        )}
+                        {obs.soil_condition && (
+                          <div>{t("zone_detail.label_soil")} <span className="text-foreground">{obs.soil_condition}</span></div>
+                        )}
+                        {displaySigns && (
+                          <div className="col-span-2">{t("zone_detail.label_signs")} <span className="text-amber-300 font-medium">{displaySigns}</span></div>
+                        )}
+                        {obs.geo_lat && obs.geo_lng && (
+                          <div className="col-span-2 text-primary">
+                            {t("zone_detail.label_gps")} {obs.geo_lat.toFixed(4)}°N, {obs.geo_lng.toFixed(4)}°E (±{Math.round(obs.geo_accuracy_m || 0)}m)
+                          </div>
+                        )}
                       </div>
-                    ) : (
-                      <div className="rounded bg-secondary/30 p-2 text-xs font-mono text-muted-foreground border border-border/50 mt-2">
-                        {t("zone_detail.media_quarantined")}
-                      </div>
-                    )}
-                  </div>
-                )}
+
+                      {displayNotes && (
+                        <div className="mb-3 p-2.5 rounded bg-secondary/30 border border-border/70 text-xs">
+                          <div className="text-[0.65rem] font-mono uppercase text-primary mb-1 flex items-center justify-between">
+                            <span>💬 Field Note / Translated Message</span>
+                            <span className="text-emerald-400 bg-emerald-500/10 px-1 py-0.5 rounded text-[0.6rem]">✓ Translated</span>
+                          </div>
+                          <p className="font-medium text-foreground whitespace-pre-wrap">{displayNotes}</p>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
+
+                {(() => {
+                  const urls: string[] = [...(obs.media_urls || [])];
+                  if (Array.isArray(obs.media_metadata)) {
+                    obs.media_metadata.forEach((m: any) => {
+                      const u =
+                        m.url ||
+                        (m.storagePath
+                          ? `https://shkpwbqcbeqlybdrhczq.supabase.co/storage/v1/object/public/field-observation-media/${m.storagePath}`
+                          : undefined);
+                      if (u && !urls.includes(u)) {
+                        urls.push(u);
+                      }
+                    });
+                  }
+
+                  if (urls.length === 0) return null;
+
+                  return (
+                    <div>
+                      {canViewMedia ? (
+                        <div className="flex flex-wrap gap-3 mt-2">
+                          {urls.map((url: string, idx: number) => {
+                            const isAudio =
+                              url.endsWith(".mp3") ||
+                              url.endsWith(".wav") ||
+                              url.endsWith(".ogg") ||
+                              url.endsWith(".m4a") ||
+                              url.includes("voice_memo") ||
+                              url.includes("audio");
+                            const isVideo =
+                              !isAudio &&
+                              (url.endsWith(".mp4") || url.endsWith(".mov") || url.includes("video"));
+
+                            return (
+                              <div key={idx} className="relative rounded overflow-hidden border border-border bg-black/40 p-1 flex items-center justify-center min-w-[140px]">
+                                {isAudio ? (
+                                  <div className="p-2 flex flex-col gap-1 w-full bg-secondary/30 rounded">
+                                    <span className="text-[0.65rem] text-muted-foreground font-mono flex items-center gap-1">
+                                      🎙️ Voice Note {idx + 1}
+                                    </span>
+                                    <audio src={url} controls className="w-48 h-8" />
+                                  </div>
+                                ) : isVideo ? (
+                                  <video src={url} controls className="h-24 w-36 object-contain" />
+                                ) : (
+                                  <a href={url} target="_blank" rel="noopener noreferrer" className="block h-24 w-36">
+                                    <img
+                                      src={url}
+                                      alt={`Observation media ${idx + 1}`}
+                                      className="h-full w-full object-cover hover:scale-105 transition-transform"
+                                      onError={(e) => {
+                                        (e.target as HTMLElement).style.display = "none";
+                                      }}
+                                    />
+                                  </a>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="rounded bg-secondary/30 p-2 text-xs font-mono text-muted-foreground border border-border/50 mt-2">
+                          {t("zone_detail.media_quarantined")}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             );
           })}

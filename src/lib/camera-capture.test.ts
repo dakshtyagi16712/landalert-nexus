@@ -92,9 +92,8 @@ describe("Camera & Video Observation Media Capture Pipeline", () => {
       road_status: "blocked",
       observer_id: "field_ranger_gangtok",
       consent_given: true,
-      media_meta: [
+      media_metadata: [
         {
-          id: videoMediaId,
           name: "camera_video.webm",
           size: videoBlob.size,
           mimeType: "video/webm",
@@ -105,8 +104,8 @@ describe("Camera & Video Observation Media Capture Pipeline", () => {
     expect(obs.idempotency_key).toBeDefined();
     const queued = getQueuedObservations();
     expect(queued.length).toBe(1);
-    expect(queued[0]?.media_meta?.[0]?.id).toBe(videoMediaId);
-    expect(queued[0]?.media_meta?.[0]?.mimeType).toBe("video/webm");
+    expect(queued[0]?.media_metadata?.[0]?.name).toBe("camera_video.webm");
+    expect(queued[0]?.media_metadata?.[0]?.mimeType).toBe("video/webm");
   });
 
   it("enforces maximum 3 media items limit per observation", () => {

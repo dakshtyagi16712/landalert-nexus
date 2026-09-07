@@ -15,6 +15,7 @@ import { supabase } from "@/integrations/supabase/client";
 import type { User } from "@supabase/supabase-js";
 
 import { getUserAuthorizationState } from "@/lib/auth-domains";
+import { captureGlobalUserLocation } from "@/hooks/useUserLocation";
 import { useTranslation } from "react-i18next";
 
 export function AuthDialog({ trigger }: { trigger?: React.ReactNode }) {
@@ -31,12 +32,18 @@ export function AuthDialog({ trigger }: { trigger?: React.ReactNode }) {
     // Check active session on mount
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null);
+      if (session?.user) {
+        captureGlobalUserLocation();
+      }
     });
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null);
+      if (session?.user) {
+        captureGlobalUserLocation();
+      }
     });
 
     return () => subscription.unsubscribe();
@@ -58,6 +65,7 @@ export function AuthDialog({ trigger }: { trigger?: React.ReactNode }) {
       } else {
         setUser(data.user);
         setInfo("Signed in successfully.");
+        captureGlobalUserLocation();
         setTimeout(() => setOpen(false), 1200);
       }
     } catch (err) {

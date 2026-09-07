@@ -23,6 +23,8 @@ import {
   ArrowLeft,
   Image as ImageIcon,
   Video as VideoIcon,
+  Volume2,
+  Play,
   Trash2,
 } from "lucide-react";
 import { FieldObservationDialog } from "./FieldObservationDialog";
@@ -33,7 +35,7 @@ import {
 } from "@/lib/observation-status";
 import type { AppUserRole } from "@/lib/auth-domains";
 import { sanitizeObservationRecord, sanitizeObservationList } from "@/lib/observation-sanitizer";
-import { getOfflineMedia } from "@/lib/offline-media-store";
+import { getOfflineMedia, getOfflineMediaByName } from "@/lib/offline-media-store";
 import { getLocalizedZoneName, getLocalizedDistrict, getLocalizedState } from "@/lib/geo-translations";
 
 interface Props {
@@ -49,6 +51,165 @@ interface Props {
   viewerRole?: AppUserRole;
   /** Supabase session access_token — forwarded as Bearer in review API calls. */
   accessToken?: string | null;
+}
+
+function AutoResolvingMediaItem({
+  item,
+  resolvedOfflineUrls,
+  onResolve,
+}: {
+  item: {
+    key: string;
+    url?: string;
+    name?: string;
+    size?: number;
+    mimeType?: string;
+    isOffline?: boolean;
+  };
+  resolvedOfflineUrls: Record<string, string>;
+  onResolve: (key: string, url: string) => void;
+}) {
+  const [localBlobUrl, setLocalBlobUrl] = useState<string | null>(item.url || null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    let isMounted = true;
+    const resolved =
+      resolvedOfflineUrls[item.key] ||
+      (item.name ? resolvedOfflineUrls[item.name] : undefined);
+    if (resolved) {
+      setLocalBlobUrl(resolved);
+      return () => {
+        isMounted = false;
+      };
+    }
+
+    const targetKey = item.key || item.name;
+
+    if (targetKey && (item.isOffline || item.key.startsWith("offline_") || !item.url)) {
+      setLoading(true);
+      (async () => {
+        try {
+          const stored =
+            (await getOfflineMedia(targetKey)) ||
+            (item.name ? await getOfflineMediaByName(item.name) : null);
+          if (stored && stored.blob && isMounted) {
+            const u = URL.createObjectURL(stored.blob);
+            setLocalBlobUrl(u);
+            onResolve(targetKey, u);
+            return;
+          }
+        } catch {
+          // ignore
+        } finally {
+          if (isMounted) setLoading(false);
+        }
+        if (item.url && isMounted) {
+          setLocalBlobUrl(item.url);
+        }
+      })();
+    } else if (item.url) {
+      setLocalBlobUrl(item.url);
+    }
+
+    return () => {
+      isMounted = false;
+    };
+  }, [item.url, item.key, item.name, item.isOffline, resolvedOfflineUrls]);
+
+  const isAudio =
+    item.mimeType?.startsWith("audio/") ||
+    item.name?.endsWith(".mp3") ||
+    item.name?.endsWith(".wav") ||
+    item.name?.endsWith(".ogg") ||
+    item.name?.endsWith(".m4a") ||
+    item.name?.includes("voice_memo") ||
+    (item.name?.endsWith(".webm") && !item.mimeType?.includes("video"));
+
+  const isVideo =
+    !isAudio &&
+    (item.mimeType?.startsWith("video/") ||
+      item.name?.endsWith(".mp4") ||
+      item.name?.endsWith(".mov") ||
+      (item.name?.endsWith(".webm") && Boolean(item.mimeType?.startsWith("video/"))));
+
+  const isImg = !isAudio && !isVideo;
+  const currentUrl = localBlobUrl || item.url;
+
+  const [imgError, setImgError] = useState(false);
+
+  if (currentUrl && !imgError) {
+    if (isAudio) {
+      return (
+        <div className="rounded border border-border bg-secondary/30 p-2.5 flex flex-col gap-2">
+          <div className="flex items-center gap-2 text-xs font-semibold text-foreground">
+            <Volume2 className="h-4 w-4 text-primary shrink-0" />
+            <span className="truncate">{item.name || "Audio Recording"}</span>
+          </div>
+          <audio src={currentUrl} controls className="w-full h-8" />
+        </div>
+      );
+    }
+
+    if (isVideo) {
+      return (
+        <div className="rounded border border-border bg-black/40 overflow-hidden">
+          <video src={currentUrl} controls className="h-36 w-full object-contain" />
+          <div className="p-1.5 text-[0.65rem] text-muted-foreground truncate">{item.name}</div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="rounded border border-border overflow-hidden bg-secondary/10 flex flex-col">
+        <a
+          href={currentUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="block overflow-hidden group hover:opacity-90 cursor-pointer"
+        >
+          <img
+            src={currentUrl}
+            alt={item.name}
+            onError={() => setImgError(true)}
+            className="h-44 w-full object-cover group-hover:scale-102 transition-transform"
+          />
+        </a>
+        <div className="p-1.5 text-[0.65rem] text-muted-foreground truncate font-mono flex items-center justify-between">
+          <span className="truncate">{item.name}</span>
+          {item.size && <span>{(item.size / 1024 / 1024).toFixed(2)} MB</span>}
+        </div>
+      </div>
+    );
+  }
+
+  // Fallback while resolving or if local blob not yet in memory
+  if (isImg) {
+    return (
+      <div className="rounded border border-border/80 bg-secondary/20 p-4 flex flex-col items-center justify-center gap-2 h-44 text-center">
+        <ImageIcon className="h-8 w-8 text-primary/60" />
+        <div className="text-xs font-medium text-foreground truncate max-w-[200px]">{item.name}</div>
+        <div className="text-[0.65rem] text-muted-foreground font-mono">
+          {loading ? "Loading photo..." : "Stored offline on reporting device"}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded border border-border/80 bg-secondary/30 p-2.5 flex items-center gap-2.5">
+      <div className="p-2 rounded bg-primary/10 text-primary shrink-0">
+        {isAudio ? <Volume2 className="h-4 w-4" /> : <VideoIcon className="h-4 w-4" />}
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="text-xs font-semibold text-foreground truncate">{item.name}</div>
+        <div className="text-[0.65rem] text-muted-foreground flex items-center gap-1.5 mt-0.5">
+          <span>{item.size ? `${(item.size / 1024 / 1024).toFixed(2)} MB` : "Field File"}</span>
+          <span className="text-primary font-medium">• {isAudio ? "Offline Audio" : "Offline Video"}</span>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export function ObservationDetailsDialog({
@@ -111,13 +272,17 @@ export function ObservationDetailsDialog({
       const urls: Record<string, string> = {};
       const mediaList = (Array.isArray(activeObs.media_metadata) ? activeObs.media_metadata : []) as any[];
       for (const meta of mediaList) {
-        if (meta.id && !meta.url) {
+        if (!meta.url) {
           try {
-            const stored = await getOfflineMedia(meta.id);
+            let stored = meta.id ? await getOfflineMedia(meta.id) : null;
+            if (!stored && meta.name) {
+              stored = await getOfflineMediaByName(meta.name);
+            }
             if (stored && stored.blob) {
               const objUrl = URL.createObjectURL(stored.blob);
               createdBlobUrls.push(objUrl);
-              urls[meta.id] = objUrl;
+              if (meta.id) urls[meta.id] = objUrl;
+              if (meta.name) urls[meta.name] = objUrl;
             }
           } catch {
             // Ignore offline fetch errors
@@ -125,7 +290,7 @@ export function ObservationDetailsDialog({
         }
       }
       if (isMounted) {
-        setResolvedOfflineUrls(urls);
+        setResolvedOfflineUrls((prev) => ({ ...prev, ...urls }));
       }
     };
 
@@ -135,7 +300,7 @@ export function ObservationDetailsDialog({
       isMounted = false;
       createdBlobUrls.forEach((u) => URL.revokeObjectURL(u));
     };
-  }, [activeObs]);
+  }, [activeObs?.id, activeObs?.visual_signs]);
 
   const filteredObservations = useMemo(() => {
     return sanitizedObservations.filter((obs) => {
@@ -382,45 +547,82 @@ export function ObservationDetailsDialog({
             </div>
 
             {/* Observation Findings */}
-            <div className="rounded border border-border bg-card p-4 space-y-3 shadow-xs">
-              <h4 className="text-xs font-bold font-display uppercase tracking-wider text-muted-foreground">
-                {t("observations.findings_title", "Ground Conditions & Visual Signs")}
-              </h4>
+            {(() => {
+              const rawSigns = activeObs.visual_signs || "";
+              let displaySigns = rawSigns;
+              let displayNotes = (activeObs as any)?.notes || (activeObs as any)?.description || "";
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div className="rounded border border-border/80 bg-secondary/30 p-2.5">
-                  <div className="text-[0.68rem] text-muted-foreground uppercase">{t("observations.visual_signs", "Visual Signs")}</div>
-                  <div className="font-semibold text-xs text-foreground mt-0.5">
-                    {activeObs.visual_signs || "Slope movement / ground distress"}
+              if (rawSigns.includes(" — ")) {
+                const parts = rawSigns.split(" — ");
+                displaySigns = parts[0]?.trim() || rawSigns;
+                const tailNote = parts.slice(1).join(" — ").trim();
+                if (!displayNotes && tailNote) {
+                  displayNotes = tailNote;
+                }
+              }
+
+              return (
+                <div className="rounded border border-border bg-card p-4 space-y-3 shadow-xs">
+                  <h4 className="text-xs font-bold font-display uppercase tracking-wider text-muted-foreground">
+                    {t("observations.findings_title", "Ground Conditions & Visual Signs")}
+                  </h4>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="rounded border border-border/80 bg-secondary/30 p-2.5">
+                      <div className="text-[0.68rem] text-muted-foreground uppercase">{t("observations.visual_signs", "Visual Signs")}</div>
+                      <div className="font-semibold text-xs text-foreground mt-0.5">
+                        {displaySigns || "Slope movement / ground distress"}
+                      </div>
+                    </div>
+
+                    <div className="rounded border border-border/80 bg-secondary/30 p-2.5">
+                      <div className="text-[0.68rem] text-muted-foreground uppercase">{t("observations.road_impact", "Road Status")}</div>
+                      <div className="font-semibold text-xs text-foreground mt-0.5">
+                        {activeObs.road_status ? activeObs.road_status.toUpperCase() : "NORMAL / OPEN"}
+                      </div>
+                    </div>
+
+                    <div className="rounded border border-border/80 bg-secondary/30 p-2.5">
+                      <div className="text-[0.68rem] text-muted-foreground uppercase">{t("observations.local_rainfall", "Local Rainfall")}</div>
+                      <div className="font-semibold text-xs text-foreground mt-0.5">
+                        {activeObs.rainfall_mm !== null && activeObs.rainfall_mm !== undefined
+                          ? `${activeObs.rainfall_mm.toFixed(1)} mm`
+                          : "Not recorded"}
+                      </div>
+                    </div>
                   </div>
-                </div>
 
-                <div className="rounded border border-border/80 bg-secondary/30 p-2.5">
-                  <div className="text-[0.68rem] text-muted-foreground uppercase">{t("observations.road_impact", "Road Status")}</div>
-                  <div className="font-semibold text-xs text-foreground mt-0.5">
-                    {activeObs.road_status ? activeObs.road_status.toUpperCase() : "NORMAL / OPEN"}
-                  </div>
-                </div>
+                  {/* Dedicated Separate Block: Field Notes / Translated Observation */}
+                  {displayNotes && (
+                    <div className="space-y-1.5 pt-2 border-t border-border/70">
+                      <div className="flex items-center justify-between text-[0.68rem] font-semibold text-muted-foreground uppercase">
+                        <span className="flex items-center gap-1.5 text-primary">
+                          <span>💬 {t("observations.field_notes", "Field Description & Translated Message")}</span>
+                        </span>
+                        <span className="text-[0.6rem] font-mono text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
+                          ✓ Translated Observation
+                        </span>
+                      </div>
+                      <div className="text-xs text-foreground bg-secondary/20 p-3 rounded border border-border/80 leading-relaxed font-sans font-medium whitespace-pre-wrap">
+                        {displayNotes}
+                      </div>
+                    </div>
+                  )}
 
-                <div className="rounded border border-border/80 bg-secondary/30 p-2.5">
-                  <div className="text-[0.68rem] text-muted-foreground uppercase">{t("observations.local_rainfall", "Local Rainfall")}</div>
-                  <div className="font-semibold text-xs text-foreground mt-0.5">
-                    {activeObs.rainfall_mm !== null && activeObs.rainfall_mm !== undefined
-                      ? `${activeObs.rainfall_mm.toFixed(1)} mm`
-                      : "Not recorded"}
-                  </div>
+                  {/* Soil condition and notes */}
+                  {activeObs.soil_condition && (
+                    <div className="space-y-1 pt-1">
+                      <div className="text-[0.68rem] text-muted-foreground uppercase font-semibold">
+                        {t("observations.soil_condition", "Soil & Slope Notes")}
+                      </div>
+                      <div className="text-xs text-muted-foreground bg-secondary/20 p-2.5 rounded border border-border/60">
+                        {activeObs.soil_condition}
+                      </div>
+                    </div>
+                  )}
                 </div>
-              </div>
-
-              {/* Soil condition and notes */}
-              <div className="space-y-1 pt-1">
-                <div className="text-[0.68rem] text-muted-foreground uppercase font-semibold">
-                  {t("observations.soil_condition", "Soil & Slope Notes")}
-                </div>
-                <div className="text-xs text-muted-foreground bg-secondary/20 p-2.5 rounded border border-border/60">
-                  {activeObs.soil_condition || activeObs.verification_notes || "No additional commentary noted by field inspector."}
-                </div>
-              </div>
+              );
+            })()}
 
               {/* Attached Evidence Media (URLs, Offline Blobs, or Metadata) */}
               {(() => {
@@ -448,8 +650,17 @@ export function ObservationDetailsDialog({
                 });
 
                 mediaMeta.forEach((m: any, i: number) => {
-                  const resolvedUrl = m.id ? resolvedOfflineUrls[m.id] : undefined;
-                  const itemUrl = m.url || resolvedUrl;
+                  const resolvedUrl =
+                    (m.id ? resolvedOfflineUrls[m.id] : undefined) ||
+                    (m.name ? resolvedOfflineUrls[m.name] : undefined);
+
+                  const itemUrl =
+                    resolvedUrl ||
+                    m.url ||
+                    (m.storagePath
+                      ? `https://shkpwbqcbeqlybdrhczq.supabase.co/storage/v1/object/public/field-observation-media/${m.storagePath}`
+                      : undefined);
+
                   // Avoid duplicate if already represented in items
                   if (itemUrl && items.some((it) => it.url === itemUrl)) return;
                   items.push({
@@ -470,65 +681,18 @@ export function ObservationDetailsDialog({
                       {t("observations.evidence_photos", "Attached Evidence Photos & Media")} ({items.length})
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                      {items.map((item) => {
-                        const isVideo =
-                          item.mimeType?.startsWith("video/") ||
-                          item.name?.endsWith(".mp4") ||
-                          item.name?.endsWith(".mov");
-
-                        if (item.url) {
-                          if (isVideo) {
-                            return (
-                              <div key={item.key} className="rounded border border-border bg-black/40 overflow-hidden">
-                                <video src={item.url} controls className="h-32 w-full object-contain" />
-                                <div className="p-1.5 text-[0.65rem] text-muted-foreground truncate">{item.name}</div>
-                              </div>
-                            );
-                          }
-                          return (
-                            <a
-                              key={item.key}
-                              href={item.url}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="block rounded border border-border overflow-hidden group hover:opacity-90 bg-secondary/10"
-                            >
-                              <img
-                                src={item.url}
-                                alt={item.name}
-                                className="h-32 w-full object-cover group-hover:scale-102 transition-transform"
-                              />
-                              <div className="p-1.5 text-[0.65rem] text-muted-foreground truncate font-mono">
-                                {item.name}
-                              </div>
-                            </a>
-                          );
-                        }
-
-                        // Staged offline evidence card
-                        return (
-                          <div
-                            key={item.key}
-                            className="rounded border border-border/80 bg-secondary/30 p-2.5 flex items-center gap-2.5"
-                          >
-                            <div className="p-2 rounded bg-primary/10 text-primary shrink-0">
-                              {isVideo ? <VideoIcon className="h-4 w-4" /> : <ImageIcon className="h-4 w-4" />}
-                            </div>
-                            <div className="min-w-0 flex-1">
-                              <div className="text-xs font-semibold text-foreground truncate">{item.name}</div>
-                              <div className="text-[0.65rem] text-muted-foreground flex items-center gap-1.5 mt-0.5">
-                                <span>{item.size ? `${(item.size / 1024 / 1024).toFixed(2)} MB` : "Field File"}</span>
-                                <span className="text-primary font-medium">• Staged Evidence</span>
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
+                      {items.map((item) => (
+                        <AutoResolvingMediaItem
+                          key={item.key}
+                          item={item}
+                          resolvedOfflineUrls={resolvedOfflineUrls}
+                          onResolve={(k, u) => setResolvedOfflineUrls((prev) => ({ ...prev, [k]: u }))}
+                        />
+                      ))}
                     </div>
                   </div>
                 );
               })()}
-            </div>
 
             {/* ── Official Review Card (role-gated) ── */}
             {canReview && (

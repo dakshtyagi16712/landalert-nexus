@@ -147,9 +147,7 @@ describe("LOCALS Escalation Service", () => {
       minutesAgo = 10,
     ): PendingObservationRow => ({
       id,
-      user_id: `user_${id}`,
       zone_id: 5,
-      hazard_type: "landslide",
       report_type: reportType,
       latitude: 25.3 + latOffset,
       longitude: 91.72 + lngOffset,
@@ -177,7 +175,7 @@ describe("LOCALS Escalation Service", () => {
       const alerts = await evaluateObservationsForLocalsEscalation(observations);
       expect(alerts.length).toBeGreaterThanOrEqual(1);
 
-      const alert = alerts[0];
+      const alert = alerts[0]!;
       expect(alert.report_type).toBe("slope_movement");
       expect(alert.detection_method).toBe("gps_proximity");
       expect(alert.observation_count).toBe(10);
@@ -229,8 +227,8 @@ describe("LOCALS Escalation Service", () => {
 
       const alerts = await evaluateObservationsForLocalsEscalation(legacyObs);
       expect(alerts.length).toBeGreaterThanOrEqual(1);
-      expect(alerts[0].report_type).toBe("slope_movement");
-      expect(alerts[0].observation_count).toBe(10);
+      expect(alerts[0]!.report_type).toBe("slope_movement");
+      expect(alerts[0]!.observation_count).toBe(10);
     });
   });
 
@@ -244,9 +242,7 @@ describe("LOCALS Escalation Service", () => {
       minutesAgo = 10,
     ): PendingObservationRow => ({
       id,
-      user_id: `user_${id}`,
       zone_id: zoneId,
-      hazard_type: "landslide",
       report_type: reportType,
       latitude: null,
       longitude: null,
@@ -262,7 +258,7 @@ describe("LOCALS Escalation Service", () => {
       const alerts = await evaluateObservationsForLocalsEscalation(zoneObs);
       expect(alerts.length).toBeGreaterThanOrEqual(1);
 
-      const alert = alerts[0];
+      const alert = alerts[0]!;
       expect(alert.detection_method).toBe("zone_fallback");
       expect(alert.zone_ids_involved).toContain(5);
       expect(alert.observation_count).toBe(10);
@@ -273,9 +269,7 @@ describe("LOCALS Escalation Service", () => {
       // 5 GPS-bearing observations + 5 GPS-lacking observations in zone 5
       const gpsObs = Array.from({ length: 5 }, (_, i) => ({
         id: `mixed_gps_${i + 1}`,
-        user_id: `user_gps_${i}`,
         zone_id: 5,
-        hazard_type: "landslide",
         report_type: "crack" as const,
         latitude: 25.3,
         longitude: 91.72,
@@ -299,9 +293,7 @@ describe("LOCALS Escalation Service", () => {
       // First 10 observations generate an active alert
       const obsBatch1 = Array.from({ length: 10 }, (_, i) => ({
         id: `suppress_obs_${i + 1}`,
-        user_id: `user_${i}`,
         zone_id: 11,
-        hazard_type: "landslide",
         report_type: "slope_movement" as const,
         latitude: 27.33 + 0.0001 * i,
         longitude: 88.61,
@@ -316,9 +308,7 @@ describe("LOCALS Escalation Service", () => {
         ...obsBatch1.slice(0, 8),
         {
           id: "suppress_obs_11",
-          user_id: "user_11",
           zone_id: 11,
-          hazard_type: "landslide",
           report_type: "slope_movement" as const,
           latitude: 27.3305,
           longitude: 88.6105,
@@ -326,9 +316,7 @@ describe("LOCALS Escalation Service", () => {
         },
         {
           id: "suppress_obs_12",
-          user_id: "user_12",
           zone_id: 11,
-          hazard_type: "landslide",
           report_type: "slope_movement" as const,
           latitude: 27.3306,
           longitude: 88.6106,
@@ -345,9 +333,7 @@ describe("LOCALS Escalation Service", () => {
       const now = new Date();
       const obsBatch = Array.from({ length: 10 }, (_, i) => ({
         id: `auth_obs_${i + 1}`,
-        user_id: `user_${i}`,
         zone_id: 11,
-        hazard_type: "landslide",
         report_type: "slope_movement" as const,
         latitude: 27.33 + 0.0001 * i,
         longitude: 88.61,
@@ -356,7 +342,7 @@ describe("LOCALS Escalation Service", () => {
       const created = await evaluateObservationsForLocalsEscalation(obsBatch);
       expect(created.length).toBeGreaterThan(0);
 
-      const alertId = created[0].id;
+      const alertId = created[0]!.id;
       const unauthResult = await resolveLocalsAlert(
         alertId,
         "FALSE_PATTERN",
@@ -371,9 +357,7 @@ describe("LOCALS Escalation Service", () => {
       const now = new Date();
       const obsBatch = Array.from({ length: 10 }, (_, i) => ({
         id: `res_obs_${i + 1}`,
-        user_id: `user_${i}`,
         zone_id: 11,
-        hazard_type: "landslide",
         report_type: "slope_movement" as const,
         latitude: 27.33 + 0.0001 * i,
         longitude: 88.61,
@@ -382,7 +366,7 @@ describe("LOCALS Escalation Service", () => {
       const created = await evaluateObservationsForLocalsEscalation(obsBatch);
       expect(created.length).toBeGreaterThan(0);
 
-      const alertToResolve = created[0];
+      const alertToResolve = created[0]!;
       const result = await resolveLocalsAlert(
         alertToResolve.id,
         "CONFIRMED_HAZARD",

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import {
   Dialog,
   DialogContent,
@@ -23,10 +23,11 @@ import { submitFieldObservationsServerFn } from "@/lib/monitoring.functions";
 import type { FieldObservationInput } from "@/lib/sync.service";
 import { supabase } from "@/integrations/supabase/client";
 import { getUserAuthorizationState } from "@/lib/auth-domains";
-import { Camera, Video, Upload } from "lucide-react";
+import { Camera, Video, Upload, Volume2, Eye, Play } from "lucide-react";
 import { ObservationCameraModal } from "@/components/ObservationCameraModal";
+import { VoiceTranslateTextarea } from "@/components/VoiceTranslateTextarea";
 import { useUserLocation } from "@/hooks/useUserLocation";
-import { extractReportType } from "@/lib/locals-escalation.service";
+import { extractReportType } from "@/lib/locals-types";
 import { useTranslation } from "react-i18next";
 import { getLocalizedZoneName, getLocalizedDistrict, getLocalizedState } from "@/lib/geo-translations";
 
@@ -227,6 +228,7 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
   const [visualSigns, setVisualSigns] = useState<string>("None");
   const [roadStatus, setRoadStatus] = useState<"open" | "restricted" | "blocked" | "unknown">("open");
   const [observerId, setObserverId] = useState<string>("citizen_observer");
+  const [fieldNotes, setFieldNotes] = useState<string>("");
 
   // 3. Geolocation Capture (Shared useUserLocation Hook)
   const {
@@ -235,8 +237,9 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
     accuracy: geoAccuracy,
     capturedAt: geoCapturedAt,
     statusText: gpsStatus,
+    loading: gpsLoading,
     requestLocation,
-  } = useUserLocation();
+  } = useUserLocation({ autoRequest: true });
 
   const captureGps = async () => {
     const loc = await requestLocation({ force: true });
@@ -245,8 +248,27 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
     }
   };
 
+  // Automatically fetch & auto-locate GPS coordinates when observation dialog opens
+  useEffect(() => {
+    if (!open) return;
+
+    if (geoLat !== null && geoLng !== null) {
+      if (!initialZoneId) {
+        autoLocateFromGps(geoLat, geoLng);
+      }
+    } else {
+      // Auto-fetch if not already in cache
+      requestLocation({ force: false }).then((loc) => {
+        if (loc && !initialZoneId) {
+          autoLocateFromGps(loc.lat, loc.lng);
+        }
+      });
+    }
+  }, [open, geoLat, geoLng, initialZoneId, requestLocation]);
+
   // 4. Media Upload (Photo/Video) & Camera System
   const [mediaList, setMediaList] = useState<MediaItem[]>([]);
+  const [previewMedia, setPreviewMedia] = useState<MediaItem | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
   const [cameraModalOpen, setCameraModalOpen] = useState(false);
   const [cameraModalMode, setCameraModalMode] = useState<"photo" | "video">("photo");
@@ -332,7 +354,15 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
       return;
     }
 
-    const ALLOWED_IMAGE_MIMES = ["image/jpeg", "image/png", "image/webp", "image/heic"];
+    const ALLOWED_IMAGE_MIMES = [
+      "image/jpeg",
+      "image/jpg",
+      "image/pjpeg",
+      "image/jfif",
+      "image/png",
+      "image/webp",
+      "image/heic",
+    ];
     const ALLOWED_VIDEO_MIMES = ["video/mp4", "video/webm", "video/quicktime"];
 
     const newItems: MediaItem[] = [];
@@ -368,12 +398,17 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
         }
       }
 
+      const normalizedMime =
+        file.type === "image/jpg" || file.type === "image/pjpeg" || file.type === "image/jfif"
+          ? "image/jpeg"
+          : file.type || (isImg ? "image/jpeg" : "video/mp4");
+
       newItems.push({
         file,
         previewUrl: URL.createObjectURL(file),
         name: file.name,
         size: file.size,
-        mimeType: file.type || (isImg ? "image/jpeg" : "video/mp4"),
+        mimeType: normalizedMime,
         base64Data,
       });
     }
@@ -385,9 +420,31 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
     }
   }
 
-  function removeMedia(idx: number) {
+  const handleRemoveMedia = (idx: number) => {
     setMediaList((prev) => prev.filter((_, i) => i !== idx));
-  }
+  };
+
+  // Handle voice audio recordings — attach to report media list
+  const handleVoiceRecorded = useCallback(
+    (blob: Blob, mediaId: string) => {
+      if (mediaList.length >= 3) return; // respect max-3 cap
+      const ext = blob.type.includes("mp4") ? "mp4" : "webm";
+      const filename = `${mediaId}.${ext}`;
+      const file = new File([blob], filename, { type: blob.type || "audio/webm" });
+      const previewUrl = URL.createObjectURL(blob);
+      setMediaList((prev) => [
+        ...prev,
+        {
+          file,
+          previewUrl,
+          name: filename,
+          size: blob.size,
+          mimeType: blob.type || "audio/webm",
+        },
+      ]);
+    },
+    [mediaList.length],
+  );
 
   const [submitting, setSubmitting] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{
@@ -424,9 +481,10 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
     const hasSoil = Boolean(soilCondition);
     const hasMedia = mediaList.length > 0;
     const hasGeo = geoLat !== null;
+    const hasNotes = fieldNotes.trim().length > 0;
 
-    if (!hasRain && !hasSigns && !hasRoad && !hasSoil && !hasMedia && !hasGeo) {
-      newErrors.general = t("field_observation.error_empty", "Empty observation: At least one field observation signal (rainfall mm, soil condition, slope signs, road status, ground photo, or GPS reading) must be provided.");
+    if (!hasRain && !hasSigns && !hasRoad && !hasSoil && !hasMedia && !hasGeo && !hasNotes) {
+      newErrors.general = t("field_observation.error_empty", "Empty observation: At least one field observation signal (rainfall mm, soil condition, slope signs, road status, field notes, ground photo, or GPS reading) must be provided.");
     }
 
     if (Object.keys(newErrors).length > 0) {
@@ -449,7 +507,7 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
     const uploadedUrls: string[] = [];
     const mediaMeta: Array<{ id?: string; name: string; size: number; mimeType: string; storagePath?: string; url?: string }> = [];
 
-    if (isOnline && connectivityState === "api_reachable" && mediaList.length > 0) {
+    if (isOnline && connectivityState !== "api_unavailable" && mediaList.length > 0) {
       let authHeaders: Record<string, string> = {};
       try {
         const session = await ensureAuthenticatedSession();
@@ -487,7 +545,11 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
         if (item.file) {
           try {
             const fd = new FormData();
-            fd.append("file", item.file);
+            const uploadBlob =
+              item.file instanceof Blob
+                ? item.file
+                : new Blob([item.file as any], { type: item.mimeType || "image/jpeg" });
+            fd.append("file", uploadBlob, item.name || "evidence.jpg");
             fd.append("zoneId", String(zoneId));
             const upRes = await fetch("/api/field-observations/upload", {
               method: "POST",
@@ -514,11 +576,19 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
           // Store in IndexedDB for resilient offline queue
           const { saveOfflineMedia } = await import("@/lib/offline-media-store");
           const mediaId = `offline_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-          await saveOfflineMedia(mediaId, item.file || item.base64Data || item.previewUrl, {
+          const payload = item.file || item.base64Data || item.previewUrl;
+          await saveOfflineMedia(mediaId, payload, {
             name: item.name,
             mimeType: item.mimeType,
             size: item.size,
           });
+          if (item.name) {
+            await saveOfflineMedia(item.name, payload, {
+              name: item.name,
+              mimeType: item.mimeType,
+              size: item.size,
+            });
+          }
           mediaMeta.push({
             id: mediaId,
             name: item.name,
@@ -532,11 +602,19 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
       const { saveOfflineMedia } = await import("@/lib/offline-media-store");
       for (const item of mediaList) {
         const mediaId = `offline_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-        await saveOfflineMedia(mediaId, item.file || item.base64Data || item.previewUrl, {
+        const payload = item.file || item.base64Data || item.previewUrl;
+        await saveOfflineMedia(mediaId, payload, {
           name: item.name,
           mimeType: item.mimeType,
           size: item.size,
         });
+        if (item.name) {
+          await saveOfflineMedia(item.name, payload, {
+            name: item.name,
+            mimeType: item.mimeType,
+            size: item.size,
+          });
+        }
         mediaMeta.push({
           id: mediaId,
           name: item.name,
@@ -554,7 +632,12 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
       observed_at: new Date().toISOString(),
       rainfall_mm: rainfallMm ? Number(rainfallMm) : undefined,
       soil_condition: soilCondition,
-      visual_signs: visualSigns === "None" ? undefined : visualSigns,
+      visual_signs:
+        visualSigns !== "None"
+          ? visualSigns
+          : (fieldNotes.trim() ? "Observed Ground Distress" : undefined),
+      notes: fieldNotes.trim() || undefined,
+      description: fieldNotes.trim() || undefined,
       road_status: roadStatus,
       report_type: extractReportType({ visual_signs: visualSigns, road_status: roadStatus }),
       observer_id: observerId.trim() || "citizen_observer",
@@ -897,7 +980,15 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
             </div>
           </div>
 
-          {/* 3. Geo-Tagged Media Upload (Photos/Videos) - Guaranteed Always Visible */}
+          {/* 3. Field Notes & Voice Audio Typing with Real-Time Translation */}
+          <VoiceTranslateTextarea
+            value={fieldNotes}
+            onChange={setFieldNotes}
+            disabled={submitting}
+            onAudioRecorded={handleVoiceRecorded}
+          />
+
+          {/* 4. Geo-Tagged Media Upload (Photos/Videos) - Guaranteed Always Visible */}
           <div className="rounded border border-border bg-secondary/20 p-3 space-y-2">
             <div className="flex items-center justify-between">
               <Label htmlFor="fieldMediaUploadInput" className="text-xs font-mono uppercase text-muted-foreground flex items-center gap-2">
@@ -998,49 +1089,99 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
             {fileError && <p className="text-[0.7rem] text-destructive font-mono">{fileError}</p>}
 
             {mediaList.length > 0 && (
-              <div className="flex flex-wrap gap-2 pt-1">
+              <div className="flex flex-col gap-2 pt-1">
                 {mediaList.map((item, idx) => {
                   const isImg = item.mimeType.startsWith("image/");
+                  const isAudio =
+                    item.mimeType.startsWith("audio/") ||
+                    item.name.endsWith(".webm") ||
+                    item.name.endsWith(".mp3") ||
+                    item.name.endsWith(".wav");
+                  const isVideo = !isAudio && item.mimeType.startsWith("video/");
                   const sizeStr =
                     item.size > 1024 * 1024
                       ? `${(item.size / (1024 * 1024)).toFixed(1)} MB`
                       : `${Math.round(item.size / 1024)} KB`;
-                  const typeLabel =
-                    item.mimeType.split("/")[1]?.toUpperCase() || (isImg ? "IMAGE" : "VIDEO");
+                  const typeLabel = isAudio
+                    ? "AUDIO"
+                    : isVideo
+                    ? "VIDEO"
+                    : "PHOTO";
 
                   return (
                     <div
                       key={idx}
-                      className="relative group border border-border rounded overflow-hidden bg-surface flex items-center gap-2 p-1.5 pr-2.5"
+                      className="border border-border/80 rounded bg-secondary/20 p-2 flex flex-col gap-1.5"
                     >
-                      {isImg ? (
-                        <img
-                          src={item.previewUrl}
-                          alt={item.name}
-                          className="h-11 w-11 object-cover rounded"
-                        />
-                      ) : (
-                        <div className="h-11 w-11 flex flex-col items-center justify-center bg-primary/20 text-xs rounded">
-                          <span className="text-base">🎬</span>
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          {isAudio ? (
+                            <div className="h-8 w-8 rounded bg-primary/20 flex items-center justify-center shrink-0">
+                              <Volume2 className="h-4 w-4 text-primary" />
+                            </div>
+                          ) : isVideo ? (
+                            <div className="h-8 w-8 rounded bg-primary/20 flex items-center justify-center shrink-0">
+                              <Video className="h-4 w-4 text-primary" />
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setPreviewMedia(item)}
+                              className="h-8 w-8 rounded overflow-hidden shrink-0 border border-border group relative cursor-pointer"
+                              title="Click to view full photo"
+                            >
+                              <img src={item.previewUrl} alt={item.name} className="h-full w-full object-cover" />
+                            </button>
+                          )}
+                          <div className="flex flex-col text-left font-mono text-[0.68rem] min-w-0">
+                            <span className="truncate font-semibold text-foreground max-w-[180px]" title={item.name}>
+                              {item.name}
+                            </span>
+                            <span className="text-[0.62rem] text-muted-foreground">
+                              {typeLabel} • {sizeStr}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {!isAudio && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setPreviewMedia(item)}
+                              className="h-6 px-2 text-[0.65rem] font-mono gap-1 text-primary hover:text-primary hover:bg-primary/10"
+                              title={isVideo ? "Play video" : "View photo"}
+                            >
+                              {isVideo ? <Play className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                              <span>{isVideo ? "Play" : "View"}</span>
+                            </Button>
+                          )}
+                          <button
+                            type="button"
+                            aria-label={`Remove media ${item.name}`}
+                            onClick={() => handleRemoveMedia(idx)}
+                            className="text-muted-foreground hover:text-destructive text-sm font-bold px-1.5 cursor-pointer"
+                            title="Remove"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Inline Player for Audio */}
+                      {isAudio && (
+                        <div className="w-full bg-card/60 p-1.5 rounded border border-border/50">
+                          <audio src={item.previewUrl} controls className="w-full h-8" />
                         </div>
                       )}
-                      <div className="flex flex-col text-left font-mono text-[0.68rem] min-w-0 max-w-[150px]">
-                        <span className="truncate font-semibold text-foreground" title={item.name}>
-                          {item.name}
-                        </span>
-                        <span className="text-[0.62rem] text-muted-foreground">
-                          {typeLabel} • {sizeStr}
-                        </span>
-                      </div>
-                      <button
-                        type="button"
-                        aria-label={`Remove media ${item.name}`}
-                        onClick={() => removeMedia(idx)}
-                        className="text-muted-foreground hover:text-destructive text-sm font-bold ml-auto px-1 cursor-pointer"
-                        title="Remove"
-                      >
-                        ×
-                      </button>
+
+                      {/* Inline Video Player */}
+                      {isVideo && (
+                        <div className="w-full bg-black/40 rounded overflow-hidden">
+                          <video src={item.previewUrl} controls className="max-h-36 w-full object-contain" />
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -1048,12 +1189,28 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
             )}
           </div>
 
-          {/* 4. GPS Geolocation Capture */}
+          {/* 4. GPS Geolocation - Automatically Captured */}
           <div className="flex items-center justify-between rounded border border-border/70 bg-secondary/10 px-3 py-2">
             <div className="space-y-0.5">
-              <div className="text-xs font-mono uppercase text-muted-foreground">{t("field_observation.gps_label", "GPS Location")}</div>
-              <div className="text-[0.7rem] font-mono text-foreground">
-                {gpsStatus || t("field_observation.gps_not_captured", "Not captured yet")}
+              <div className="flex items-center gap-1.5 text-xs font-mono uppercase text-muted-foreground">
+                <span>📍 {t("field_observation.gps_label", "GPS Location")}</span>
+                {geoLat !== null && geoLng !== null ? (
+                  <span className="inline-flex items-center rounded-full bg-emerald-500/20 px-1.5 py-0.2 text-[0.62rem] font-medium text-emerald-600 dark:text-emerald-400">
+                    ✓ {t("field_observation.auto_fetched", "Auto-Fetched")}
+                  </span>
+                ) : gpsLoading ? (
+                  <span className="inline-flex items-center gap-1 text-[0.62rem] text-primary">
+                    <span className="inline-block h-2 w-2 rounded-full border border-primary border-t-transparent animate-spin" />
+                    {t("field_observation.fetching_gps", "Fetching...")}
+                  </span>
+                ) : null}
+              </div>
+              <div className="text-[0.7rem] font-mono text-foreground font-medium">
+                {geoLat !== null && geoLng !== null
+                  ? `${geoLat.toFixed(4)}°N, ${geoLng.toFixed(4)}°E (±${Math.round(geoAccuracy || 5)}m)`
+                  : gpsLoading
+                    ? t("field_observation.fetching_gps_desc", "Acquiring device GPS automatically...")
+                    : gpsStatus || t("field_observation.gps_not_captured", "Acquiring GPS location...")}
               </div>
             </div>
             <Button
@@ -1165,6 +1322,37 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
       initialMode={cameraModalMode}
       onCapture={processCapturedFile}
     />
+
+    {/* Media Preview Lightbox Modal */}
+    {previewMedia && (
+      <Dialog open={Boolean(previewMedia)} onOpenChange={() => setPreviewMedia(null)}>
+        <DialogContent className="max-w-2xl bg-card border-border p-4">
+          <DialogHeader>
+            <DialogTitle className="text-sm font-mono truncate">{previewMedia.name}</DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              {previewMedia.mimeType} • {Math.round(previewMedia.size / 1024)} KB
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex items-center justify-center p-2 min-h-[200px] max-h-[70vh] overflow-hidden bg-black/50 rounded">
+            {previewMedia.mimeType.startsWith("image/") ? (
+              <img src={previewMedia.previewUrl} alt={previewMedia.name} className="max-h-[65vh] w-auto object-contain rounded" />
+            ) : previewMedia.mimeType.startsWith("video/") ? (
+              <video src={previewMedia.previewUrl} controls autoPlay className="max-h-[65vh] w-full rounded" />
+            ) : (
+              <div className="w-full p-6 flex flex-col items-center gap-3">
+                <Volume2 className="h-10 w-10 text-primary animate-pulse" />
+                <audio src={previewMedia.previewUrl} controls autoPlay className="w-full" />
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" size="sm" onClick={() => setPreviewMedia(null)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    )}
   </>
   );
 }

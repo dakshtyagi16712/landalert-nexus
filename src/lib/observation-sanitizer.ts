@@ -140,6 +140,24 @@ export function sanitizeObservationRecord<T extends Record<string, any>>(obs: T)
     if (!sanitized.source && metadata.source) {
       sanitized.source = metadata.source;
     }
+
+    // 6. Notes & field description
+    if (!sanitized.notes && metadata["notes"]) {
+      sanitized.notes = metadata["notes"];
+    }
+  }
+
+  // Extract separate field notes if visual_signs has "Sign — Notes" legacy formatting
+  if (sanitized.visual_signs && sanitized.visual_signs.includes(" — ")) {
+    const parts = sanitized.visual_signs.split(" — ");
+    const headSign = parts[0]?.trim();
+    const tailNote = parts.slice(1).join(" — ").trim();
+    if (headSign) {
+      sanitized.visual_signs = headSign;
+    }
+    if (!sanitized.notes && tailNote) {
+      sanitized.notes = tailNote;
+    }
   }
 
   return sanitized as T;

@@ -16,6 +16,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { getUserAuthorizationState } from "@/lib/auth-domains";
 import { searchGeography, type SearchResultItem } from "@/lib/geography";
 import type { User } from "@supabase/supabase-js";
+import { captureGlobalUserLocation } from "@/hooks/useUserLocation";
 import "@/lib/i18n";
 
 export function ConsoleNav() {
@@ -28,13 +29,21 @@ export function ConsoleNav() {
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
+      const u = session?.user ?? null;
+      setUser(u);
+      if (u) {
+        captureGlobalUserLocation();
+      }
     });
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
+      const u = session?.user ?? null;
+      setUser(u);
+      if (u) {
+        captureGlobalUserLocation();
+      }
     });
 
     return () => subscription.unsubscribe();
@@ -292,7 +301,18 @@ export function ConsoleNav() {
             >
               {t("nav.risk_map", "Risk Map")}
             </a>
-            <NavLink to="/observations" label={t("nav.observations", "Observations")} />
+            <a
+              href="/#recent-observations"
+              onClick={(e) => handleNavToSection(e, "recent-observations")}
+              className={`whitespace-nowrap px-3 py-2.5 text-xs font-medium transition-colors cursor-pointer ${
+                currentPath === "/" &&
+                (routerState.location.hash === "recent-observations" || routerState.location.hash === "observations")
+                  ? "text-primary font-semibold"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {t("nav.observations", "Observations")}
+            </a>
             <NavLink to="/alerts" label={t("nav.alerts", "Alerts")} />
             <a
               href="/#road-connectivity"

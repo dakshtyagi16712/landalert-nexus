@@ -28,6 +28,8 @@ export interface FieldObservationInput {
   road_status?: ("open" | "restricted" | "blocked" | "unknown") | undefined;
   observer_id?: string | undefined;
   idempotency_key?: string | undefined;
+  notes?: string | undefined;
+  description?: string | undefined;
   // Geo-tagged Media & Sensor Coordinates (Task 2)
   media_urls?: string[] | undefined;
   media_metadata?:
@@ -139,6 +141,8 @@ export async function syncFieldObservations(records: FieldObservationInput[]): P
     rainfall_mm: number | null;
     soil_condition: string | null;
     visual_signs: string | null;
+    notes?: string | null;
+    report_type?: string | null;
     road_status: "open" | "restricted" | "blocked" | "unknown" | null;
     observer_id: string;
     idempotency_key: string;
@@ -192,8 +196,9 @@ export async function syncFieldObservations(records: FieldObservationInput[]): P
     const hasSoil = Boolean(r.soil_condition && r.soil_condition.trim() !== "");
     const hasMedia = Boolean(r.media_urls && r.media_urls.length > 0);
     const hasGeo = r.geo_lat !== undefined && r.geo_lat !== null;
+    const hasNotes = Boolean((r.notes && r.notes.trim() !== "") || (r.description && r.description.trim() !== ""));
 
-    if (!hasRainfall && !hasVisualSigns && !hasRoadStatus && !hasSoil && !hasMedia && !hasGeo) {
+    if (!hasRainfall && !hasVisualSigns && !hasRoadStatus && !hasSoil && !hasMedia && !hasGeo && !hasNotes) {
       errors.push(`Record ${i}: empty observation, at least one observational measurement or signal is required`);
       continue;
     }
@@ -225,9 +230,9 @@ export async function syncFieldObservations(records: FieldObservationInput[]): P
     const source = isOfficial ? "OFFICIAL_SURVEY" : "PUBLIC_REPORT";
 
     const reportType = r.report_type ?? extractReportType({
-      report_type: r.report_type,
-      visual_signs: r.visual_signs,
-      road_status: r.road_status,
+      report_type: r.report_type ?? null,
+      visual_signs: r.visual_signs ?? null,
+      road_status: r.road_status ?? null,
     });
 
     validRows.push({
@@ -237,6 +242,7 @@ export async function syncFieldObservations(records: FieldObservationInput[]): P
       rainfall_mm: rainfall,
       soil_condition: r.soil_condition ?? null,
       visual_signs: r.visual_signs ?? null,
+      notes: r.notes ?? r.description ?? null,
       road_status: r.road_status ?? null,
       report_type: reportType,
       observer_id: r.observer_id.trim(),
@@ -289,7 +295,7 @@ export async function syncFieldObservations(records: FieldObservationInput[]): P
           INSERT INTO public.field_observations 
           (zone_id, observer_id, observed_at, client_timestamp, rainfall_mm, soil_condition, visual_signs, road_status, idempotency_key, sync_status, status, is_training_eligible, source, media_urls, media_metadata, geo_lat, geo_lng, geo_accuracy_m, geo_captured_at, consent_given, review_status)
           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'synced', $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
-          ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING;
+          ON CONFLICT (idempotency_key) DO NOTHING;
         `,
           [
             r.zone_id,
@@ -367,9 +373,10 @@ export async function syncFieldObservations(records: FieldObservationInput[]): P
       const key = r.idempotency_key || String(idx);
       baseVisualSignsMap.set(key, r.visual_signs || "");
     });
+
     let usePlainInsert = false;
 
-    for (let attempt = 0; attempt < 12; attempt++) {
+    for (let attempt = 0; attempt < 35; attempt++) {
       const query = usePlainInsert
         ? supabaseAdmin.from("field_observations").insert(currentRows as any)
         : supabaseAdmin.from("field_observations").upsert(currentRows as any, {
@@ -386,13 +393,23 @@ export async function syncFieldObservations(records: FieldObservationInput[]): P
 
       lastError = upsertErr;
 
-      // Handle missing unique/exclusion constraint for ON CONFLICT specification
+      // If ON CONFLICT unique constraint is missing, switch to plain insert
       if (
         upsertErr.message.includes("unique or exclusion constraint") ||
         upsertErr.message.includes("ON CONFLICT")
       ) {
         usePlainInsert = true;
         continue;
+      }
+
+      // If duplicate key error occurs on plain insert, treat already-synced rows as success
+      if (
+        upsertErr.message.includes("duplicate key") ||
+        upsertErr.message.includes("already exists") ||
+        (upsertErr as any).code === "23505"
+      ) {
+        syncSuccess = true;
+        break;
       }
 
       // Handle missing column in PostgREST schema cache
@@ -407,7 +424,7 @@ export async function syncFieldObservations(records: FieldObservationInput[]): P
             const copy = { ...row };
             delete copy[missingCol];
 
-            // Embed stripped metadata into visual_signs safely without corrupting base signs
+            // Embed stripped metadata into visual_signs / evidence_summary safely
             const metaJson = JSON.stringify(strippedMetadata[key]);
             const baseSigns = baseVisualSignsMap.get(key) || "";
             copy.visual_signs = baseSigns

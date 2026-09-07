@@ -36,6 +36,7 @@ export default defineConfig(({ command, mode }) => {
         "react/jsx-runtime",
         "react/jsx-dev-runtime",
       ],
+      exclude: ["@xenova/transformers"],
       ignoreOutdatedRequests: true,
     },
     server: {

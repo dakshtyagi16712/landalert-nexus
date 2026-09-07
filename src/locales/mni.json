@@ -43,7 +43,9 @@
     "report_observation_for_zone": "+ {{zone}} গীদমক পাও থাগৎপা",
     "ml_risk": "ML খুদোংথিবা",
     "residents": "মীশিং",
-    "mean_slope": "ময়াই ওইবা চিংশিং"
+    "mean_slope": "ময়াই ওইবা চিংশিং",
+    "calculate_risk": "খুদোংথিবা লেপপা",
+    "calculating_risk": "খুদোংথিবা লেপ্লি..."
   },
   "risk_levels": {
     "Low": "নেম্বা",
@@ -219,7 +221,10 @@
     "error_video_size": "মৈতৈলোন্ Video {{name}} exceeds 50MB limit.",
     "error_image_size": "মৈতৈলোন্ Image {{name}} exceeds 10MB limit.",
     "error_format": "মৈতৈলোন্ Unsupported format: {{name}}. Only photos and videos allowed.",
-    "network_error": "মৈতৈলোন্ Network error encountered. Observation preserved in offline queue."
+    "network_error": "মৈতৈলোন্ Network error encountered. Observation preserved in offline queue.",
+    "auto_fetched": "অতোমেতিক ওইনা লৌবা",
+    "fetching_gps": "লৌরি...",
+    "fetching_gps_desc": "দিবাইস জিপিএস অতোমেতিক ওইনা লৌরি..."
   },
   "offline": {
     "banner_title": "ওফলাইন মোদ — কেস তৌরবা দেতা",

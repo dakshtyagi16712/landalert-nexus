@@ -76,7 +76,16 @@ export async function saveOfflineMedia(
 ): Promise<void> {
   let blob: Blob;
   if (data instanceof Blob) {
-    blob = data;
+    if (typeof File !== "undefined" && data instanceof File) {
+      try {
+        const buf = await data.arrayBuffer();
+        blob = new Blob([buf], { type: data.type || meta.mimeType || "image/jpeg" });
+      } catch {
+        blob = data;
+      }
+    } else {
+      blob = data;
+    }
   } else if (typeof data === "string" && data.startsWith("data:")) {
     const parts = data.split(",");
     const mime = parts[0]?.match(/:(.*?);/)?.[1] || meta.mimeType || "application/octet-stream";
@@ -87,6 +96,13 @@ export async function saveOfflineMedia(
       u8arr[n] = bstr.charCodeAt(n);
     }
     blob = new Blob([u8arr], { type: mime });
+  } else if (typeof data === "string" && data.startsWith("blob:")) {
+    try {
+      const res = await fetch(data);
+      blob = await res.blob();
+    } catch {
+      blob = new Blob([data], { type: meta.mimeType });
+    }
   } else {
     blob = new Blob([data], { type: meta.mimeType });
   }
@@ -117,7 +133,6 @@ export async function saveOfflineMedia(
         memoryMediaMap.set(id, record);
         resolve();
       };
-      tx.oncomplete = () => db.close();
       tx.onerror = () => {
         memoryMediaMap.set(id, record);
         resolve();
@@ -152,7 +167,50 @@ export async function getOfflineMedia(id: string): Promise<StoredOfflineMedia | 
       req.onerror = () => {
         resolve(null);
       };
-      tx.oncomplete = () => db.close();
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+/**
+ * Retrieves a media file from IndexedDB by filename.
+ */
+export async function getOfflineMediaByName(name: string): Promise<StoredOfflineMedia | null> {
+  const targetLower = name.trim().toLowerCase();
+  for (const item of memoryMediaMap.values()) {
+    if (item.name === name || item.name.toLowerCase() === targetLower) return item;
+  }
+
+  const db = await openDatabase();
+  if (!db) return null;
+
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction(STORE_NAME, "readonly");
+      const store = tx.objectStore(STORE_NAME);
+      const req = store.openCursor();
+
+      req.onsuccess = (e: any) => {
+        const cursor = e.target.result;
+        if (cursor) {
+          const val = cursor.value;
+          if (
+            val &&
+            (val.name === name ||
+              val.id === name ||
+              val.name?.toLowerCase() === targetLower ||
+              val.id?.toLowerCase() === targetLower)
+          ) {
+            resolve(cursor.value);
+            return;
+          }
+          cursor.continue();
+        } else {
+          resolve(null);
+        }
+      };
+      req.onerror = () => resolve(null);
     } catch {
       resolve(null);
     }
@@ -176,7 +234,6 @@ export async function deleteOfflineMedia(id: string): Promise<void> {
 
       req.onsuccess = () => resolve();
       req.onerror = () => resolve();
-      tx.oncomplete = () => db.close();
     } catch {
       resolve();
     }

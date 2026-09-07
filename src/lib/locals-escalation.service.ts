@@ -36,47 +36,35 @@ export const LOCALS_OVERLAP_SUPPRESSION_THRESHOLD = 0.5;
 // Types & Enums
 // ==============================================================================
 
-export type LocalsReportType = "crack" | "slope_movement" | "road_blocked" | "other";
+import {
+  type LocalsReportType,
+  type LocalsDetectionMethod,
+  type LocalsAlertStatus,
+  type LocalsResolutionAction,
+  type LocalsObservationLike,
+  type LocalsAlertRecord,
+  extractReportType,
+} from "./locals-types";
 
-export type LocalsDetectionMethod = "gps_proximity" | "zone_fallback";
+export {
+  type LocalsReportType,
+  type LocalsDetectionMethod,
+  type LocalsAlertStatus,
+  type LocalsResolutionAction,
+  type LocalsObservationLike,
+  type LocalsAlertRecord,
+  extractReportType,
+};
 
-export type LocalsAlertStatus = "ACTIVE" | "RESOLVED" | "DISMISSED";
+export type PendingObservationRow = LocalsObservationLike;
 
-export type LocalsResolutionAction = "CONFIRMED_HAZARD" | "FALSE_PATTERN";
-
-export interface LocalsObservationLike {
-  id: number | string;
-  zone_id: number;
-  observed_at?: string | null;
-  created_at?: string | null;
-  report_type?: string | null;
-  visual_signs?: string | null;
-  road_status?: string | null;
-  geo_lat?: number | null;
-  geo_lng?: number | null;
-  latitude?: number | null;
-  longitude?: number | null;
-  status?: string | null;
-  review_status?: string | null;
-}
-
-export interface LocalsAlertRecord {
-  id: number;
-  report_type: LocalsReportType;
-  center_lat: number | null;
-  center_lng: number | null;
-  observation_count: number;
-  triggering_observation_ids: number[];
-  zone_ids_involved: number[];
-  detection_method: LocalsDetectionMethod;
-  first_observed_at: string;
-  triggered_at: string;
-  status: LocalsAlertStatus;
-  resolved_by?: string | null;
-  resolved_at?: string | null;
-  resolution_note?: string | null;
-  resolution_action?: LocalsResolutionAction | null;
-}
+export const LOCALS_CONSTANTS = {
+  CLUSTER_THRESHOLD: LOCALS_CLUSTER_THRESHOLD,
+  WINDOW_HOURS: LOCALS_WINDOW_HOURS,
+  WINDOW_MS: LOCALS_WINDOW_MS,
+  RADIUS_METERS: LOCALS_RADIUS_METERS,
+  OVERLAP_SUPPRESSION_THRESHOLD: LOCALS_OVERLAP_SUPPRESSION_THRESHOLD,
+};
 
 // In-memory alert store for testing and offline fallback
 const IN_MEMORY_LOCALS_ALERTS: LocalsAlertRecord[] = [];
@@ -157,59 +145,7 @@ export function haversineDistanceMeters(
   return R * c;
 }
 
-// ==============================================================================
-// Canonical Report Type Normalization
-// ==============================================================================
 
-/**
- * Derives the canonical report type for an observation.
- * 
- * Priority order:
- * 1. Explicit report_type enum if already present and valid.
- * 2. Visual slope failure indicators ("crack" or "slope_movement") take FIRST priority
- *    so a slope failure that also impacts a road is correctly identified by its root cause.
- * 3. road_status === "blocked" ONLY if visual signs are empty / "None observed".
- * 4. Fallback to "other".
- */
-export function extractReportType(obs: {
-  report_type?: string | null;
-  visual_signs?: string | null;
-  road_status?: string | null;
-}): LocalsReportType {
-  // 1. Explicit canonical enum field
-  if (obs.report_type) {
-    const norm = obs.report_type.toLowerCase();
-    if (norm === "crack" || norm === "slope_movement" || norm === "road_blocked" || norm === "other") {
-      return norm as LocalsReportType;
-    }
-  }
-
-  const signs = (obs.visual_signs || "").trim().toLowerCase();
-  const hasVisualSign = signs.length > 0 && signs !== "none" && signs !== "none observed";
-
-  // 2. Visual slope failure signs FIRST
-  if (hasVisualSign) {
-    if (signs.includes("crack")) {
-      return "crack";
-    }
-    if (
-      signs.includes("mudflow") ||
-      signs.includes("slump") ||
-      signs.includes("tilting") ||
-      signs.includes("rockfall") ||
-      signs.includes("slope")
-    ) {
-      return "slope_movement";
-    }
-  }
-
-  // 3. Pure road blockage with NO visual slope failure sign
-  if (obs.road_status === "blocked") {
-    return "road_blocked";
-  }
-
-  return "other";
-}
 
 /**
  * Parses observation ID into a numeric representation.
@@ -362,7 +298,7 @@ export async function createLocalsAlertRecord(
 ): Promise<LocalsAlertRecord | null> {
   if (cluster.length < LOCALS_CLUSTER_THRESHOLD) return null;
 
-  const reportType = extractReportType(cluster[0]);
+  const reportType = extractReportType(cluster[0] ?? {});
   const triggeringIds = cluster.map((o) => parseObsId(o.id));
   const zoneIdsSet = new Set<number>();
   cluster.forEach((o) => {
@@ -388,7 +324,7 @@ export async function createLocalsAlertRecord(
   const sortedTimes = cluster
     .map((o) => getObsTime(o))
     .sort((a, b) => a - b);
-  const firstObservedAt = new Date(sortedTimes[0]).toISOString();
+  const firstObservedAt = new Date(sortedTimes[0] ?? Date.now()).toISOString();
   const triggeredAt = new Date().toISOString();
 
   const newAlert: LocalsAlertRecord = {

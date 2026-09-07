@@ -510,53 +510,80 @@ export function ObservationsPage() {
                   </div>
 
                   {/* Measurements & Ground Signs Grid */}
-                  <div className="grid grid-cols-2 gap-2 rounded bg-secondary/30 p-2.5 text-xs font-mono">
-                    <div>
-                      <span className="block text-[0.65rem] uppercase text-muted-foreground">
-                        Rainfall (24h)
-                      </span>
-                      <span className="font-semibold text-foreground">
-                        {obs.rainfall_mm !== undefined && obs.rainfall_mm !== null
-                          ? `${obs.rainfall_mm} mm`
-                          : "None reported"}
-                      </span>
-                    </div>
+                  {(() => {
+                    const rawSigns = obs.visual_signs || "";
+                    let displaySigns = rawSigns;
+                    let displayNotes = (obs as any)?.notes || (obs as any)?.description || "";
+                    if (rawSigns.includes(" — ")) {
+                      const parts = rawSigns.split(" — ");
+                      displaySigns = parts[0]?.trim() || rawSigns;
+                      const tailNote = parts.slice(1).join(" — ").trim();
+                      if (!displayNotes && tailNote) {
+                        displayNotes = tailNote;
+                      }
+                    }
 
-                    <div>
-                      <span className="block text-[0.65rem] uppercase text-muted-foreground">
-                        Soil Condition
-                      </span>
-                      <span className="font-semibold text-foreground capitalize">
-                        {obs.soil_condition || "damp"}
-                      </span>
-                    </div>
+                    return (
+                      <>
+                        <div className="grid grid-cols-2 gap-2 rounded bg-secondary/30 p-2.5 text-xs font-mono">
+                          <div>
+                            <span className="block text-[0.65rem] uppercase text-muted-foreground">
+                              Rainfall (24h)
+                            </span>
+                            <span className="font-semibold text-foreground">
+                              {obs.rainfall_mm !== undefined && obs.rainfall_mm !== null
+                                ? `${obs.rainfall_mm} mm`
+                                : "None reported"}
+                            </span>
+                          </div>
 
-                    <div>
-                      <span className="block text-[0.65rem] uppercase text-muted-foreground">
-                        Slope Signs
-                      </span>
-                      <span className="font-semibold text-foreground truncate block" title={obs.visual_signs || "None"}>
-                        {obs.visual_signs || "None"}
-                      </span>
-                    </div>
+                          <div>
+                            <span className="block text-[0.65rem] uppercase text-muted-foreground">
+                              Soil Condition
+                            </span>
+                            <span className="font-semibold text-foreground capitalize">
+                              {obs.soil_condition || "damp"}
+                            </span>
+                          </div>
 
-                    <div>
-                      <span className="block text-[0.65rem] uppercase text-muted-foreground">
-                        Road Status
-                      </span>
-                      <span
-                        className={`font-semibold uppercase ${
-                          obs.road_status === "blocked"
-                            ? "text-red-400"
-                            : obs.road_status === "restricted"
-                            ? "text-amber-400"
-                            : "text-foreground"
-                        }`}
-                      >
-                        {obs.road_status || "open"}
-                      </span>
-                    </div>
-                  </div>
+                          <div>
+                            <span className="block text-[0.65rem] uppercase text-muted-foreground">
+                              Slope Signs
+                            </span>
+                            <span className="font-semibold text-foreground truncate block" title={displaySigns || "None"}>
+                              {displaySigns || "None"}
+                            </span>
+                          </div>
+
+                          <div>
+                            <span className="block text-[0.65rem] uppercase text-muted-foreground">
+                              Road Status
+                            </span>
+                            <span
+                              className={`font-semibold uppercase ${
+                                obs.road_status === "blocked"
+                                  ? "text-red-400"
+                                  : obs.road_status === "restricted"
+                                  ? "text-amber-400"
+                                  : "text-foreground"
+                              }`}
+                            >
+                              {obs.road_status || "open"}
+                            </span>
+                          </div>
+                        </div>
+
+                        {displayNotes && (
+                          <div className="p-2.5 rounded bg-secondary/30 border border-border/70 text-xs">
+                            <span className="text-[0.65rem] font-mono text-primary uppercase block mb-1">
+                              💬 Field Description & Translated Message:
+                            </span>
+                            <p className="font-medium text-foreground whitespace-pre-wrap">{displayNotes}</p>
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
 
                   {/* Attached Media Photos */}
                   {obs.media_metadata && obs.media_metadata.length > 0 && (
