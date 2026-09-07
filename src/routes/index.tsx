@@ -887,7 +887,7 @@ function Dashboard() {
           </div>
         )}
 
-        {/* Upper Dashboard Grid: Left (Risk Map) vs Right (Region Overview + Response Priority + Quick Actions + Regional Observations) */}
+        {/* Upper Dashboard Grid: Left (Risk Map) vs Right (Quick Actions + Response Priority + Region Overview + Regional Observations) */}
         <section className="grid grid-cols-1 lg:grid-cols-[1.4fr_1fr] gap-6 items-start">
           {/* LEFT: Landslide Risk Map */}
           <div className="space-y-4">
@@ -1407,9 +1407,163 @@ function Dashboard() {
             )}
           </div>
 
-          {/* RIGHT: Region Overview + Response Priority + Quick Actions + Regional Observations */}
+          {/* RIGHT: Quick Actions + Response Priority + Region Overview + Regional Observations */}
           <div className="space-y-4">
-            {/* 1. Region Overview */}
+            {/* 1. Quick Actions */}
+            <div className="panel p-4">
+              <h2 className="text-base font-bold text-foreground font-display mb-3">
+                {t("quick_actions.title", "Quick Actions")}
+              </h2>
+              <div className="grid grid-cols-2 gap-3">
+                <a
+                  href="#risk-map"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    window.history.pushState(null, "", "/#risk-map");
+                    const el = document.getElementById("risk-map");
+                    if (el) {
+                      el.scrollIntoView({ behavior: "smooth" });
+                    }
+                  }}
+                  className="rounded border border-border bg-surface p-3 hover:bg-secondary/40 transition-colors flex flex-col items-start gap-1 group"
+                >
+                  <MapIcon className="h-5 w-5 text-primary shrink-0" />
+                  <span className="font-display font-bold text-xs text-foreground group-hover:text-primary transition-colors">
+                    {t("quick_actions.view_risk_map", "View Risk Map")}
+                  </span>
+                  <span className="text-[0.68rem] text-muted-foreground leading-tight">
+                    {t("quick_actions.explore_levels", "Explore current risk levels")}
+                  </span>
+                </a>
+
+                <FieldObservationDialog
+                  trigger={
+                    <button
+                      type="button"
+                      className="rounded border border-border bg-surface p-3 hover:bg-secondary/40 transition-colors flex flex-col items-start gap-1 text-left w-full group cursor-pointer"
+                    >
+                      <FilePlus className="h-5 w-5 text-primary shrink-0" />
+                      <span className="font-display font-bold text-xs text-foreground group-hover:text-primary transition-colors">
+                        {t("quick_actions.report_observation", "Report Observation")}
+                      </span>
+                      <span className="text-[0.68rem] text-muted-foreground leading-tight">
+                        {t("quick_actions.submit_field", "Submit a field observation")}
+                      </span>
+                    </button>
+                  }
+                  onSuccess={() => qc.invalidateQueries()}
+                />
+
+                <Link
+                  to="/alerts"
+                  className="rounded border border-border bg-surface p-3 hover:bg-secondary/40 transition-colors flex flex-col items-start gap-1 group"
+                >
+                  <AlertTriangle className="h-5 w-5 text-amber-500 shrink-0" />
+                  <span className="font-display font-bold text-xs text-foreground group-hover:text-amber-500 transition-colors">
+                    {t("quick_actions.view_alerts", "View Alerts")}
+                  </span>
+                  <span className="text-[0.68rem] text-muted-foreground leading-tight">
+                    {t("quick_actions.latest_warnings", "Latest warnings and advisories")}
+                  </span>
+                </Link>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRoadDialogOpen(true);
+                    window.history.pushState(null, "", "/#road-connectivity");
+                    const el = document.getElementById("road-connectivity");
+                    if (el) el.scrollIntoView({ behavior: "smooth" });
+                  }}
+                  className="rounded border border-border bg-surface p-3 hover:bg-secondary/40 transition-colors flex flex-col items-start gap-1 text-left group cursor-pointer"
+                >
+                  <RouteIcon className="h-5 w-5 text-primary shrink-0" />
+                  <span className="font-display font-bold text-xs text-foreground group-hover:text-primary transition-colors">
+                    {t("quick_actions.check_roads", "Check Roads")}
+                  </span>
+                  <span className="text-[0.68rem] text-muted-foreground leading-tight">
+                    {t("quick_actions.critical_links", "Critical and vulnerable links")}
+                  </span>
+                </button>
+              </div>
+            </div>
+
+            {/* 2. Response Priority (Multi-factor Urgency Ranking) */}
+            <div className="panel p-4">
+              <div className="flex items-center justify-between border-b border-border pb-2.5">
+                <div>
+                  <h2 className="text-base font-bold text-foreground font-display">
+                    {t("response_prioritization.section_title", "Response Priority")}
+                  </h2>
+                  <p className="text-[0.68rem] text-muted-foreground">
+                    {t("response_prioritization.decision_support", "Multi-factor operational urgency ranking for decision support")}
+                  </p>
+                </div>
+                <span className="text-[0.65rem] font-mono text-muted-foreground">
+                  {t("response_prioritization.weights_summary", "40% Risk · 25% Pop · 20% Road · 15% Obs")}
+                </span>
+              </div>
+
+              <div className="mt-2.5 overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse font-sans">
+                  <thead>
+                    <tr className="border-b border-border bg-secondary/30 text-muted-foreground font-medium">
+                      <th className="py-2 px-2.5 whitespace-nowrap">{t("response_prioritization.rank", "Rank")}</th>
+                      <th className="py-2 px-2.5 whitespace-nowrap">{t("response_prioritization.zone", "Zone")}</th>
+                      <th className="py-2 px-2.5 whitespace-nowrap">{t("response_prioritization.score", "Score")}</th>
+                      <th className="py-2 px-2.5 whitespace-nowrap">{t("response_prioritization.road_cutoff", "Roads")}</th>
+                      <th className="py-2 px-2.5 text-right">{t("common.action", "Action")}</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/60">
+                    {(prioritizationData?.rankedZones ?? []).slice(0, 4).map((item) => (
+                      <tr key={item.zoneId} className="hover:bg-secondary/20 transition-colors">
+                        <td className="py-2.5 px-2.5 font-display font-bold text-foreground text-center">
+                          #{item.rank}
+                        </td>
+                        <td className="py-2.5 px-2.5">
+                          <span className="font-semibold text-foreground block font-display">
+                            {getLocalizedZoneName(item.zoneId, item.zoneName, t)}
+                          </span>
+                          <span className="text-[0.65rem] text-muted-foreground">
+                            {getLocalizedDistrict(item.district, t)}, {getLocalizedState(item.state, t)}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-2.5 whitespace-nowrap">
+                          <PrioritizationScoreBadge score={item.priorityScore} />
+                        </td>
+                        <td className="py-2.5 px-2.5 whitespace-nowrap">
+                          <RoadBadge status={item.worstRoadStatus} />
+                        </td>
+                        <td className="py-2.5 px-2.5 text-right">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedId(item.zoneId);
+                              setShowZoneDetails(true);
+                              const el = document.getElementById("risk-map");
+                              if (el) el.scrollIntoView({ behavior: "smooth" });
+                            }}
+                            className="text-xs text-primary font-medium hover:underline cursor-pointer"
+                          >
+                            {t("road_network.view_zone", "View Zone →")}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                    {(!prioritizationData?.rankedZones || prioritizationData.rankedZones.length === 0) && (
+                      <tr>
+                        <td colSpan={5} className="py-4 text-center text-muted-foreground">
+                          {t("response_prioritization.no_zones", "No prioritised zones available.")}
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* 3. Region Overview */}
             <div className="panel p-4 flex flex-col justify-between">
               <div>
                 <div className="flex items-center justify-between border-b border-border pb-2.5">
@@ -1513,160 +1667,6 @@ function Dashboard() {
                   className="inline-flex items-center gap-1 text-xs font-semibold text-red-900 dark:text-red-300 hover:underline shrink-0 font-sans cursor-pointer"
                 >
                   <span>{t("overview.view_details", "View details →")}</span>
-                </button>
-              </div>
-            </div>
-
-            {/* 2. Response Priority (Multi-factor Urgency Ranking) */}
-            <div className="panel p-4">
-              <div className="flex items-center justify-between border-b border-border pb-2.5">
-                <div>
-                  <h2 className="text-base font-bold text-foreground font-display">
-                    {t("response_prioritization.section_title", "Response Priority")}
-                  </h2>
-                  <p className="text-[0.68rem] text-muted-foreground">
-                    {t("response_prioritization.decision_support", "Multi-factor operational urgency ranking for decision support")}
-                  </p>
-                </div>
-                <span className="text-[0.65rem] font-mono text-muted-foreground">
-                  {t("response_prioritization.weights_summary", "40% Risk · 25% Pop · 20% Road · 15% Obs")}
-                </span>
-              </div>
-
-              <div className="mt-2.5 overflow-x-auto">
-                <table className="w-full text-left text-xs border-collapse font-sans">
-                  <thead>
-                    <tr className="border-b border-border bg-secondary/30 text-muted-foreground font-medium">
-                      <th className="py-2 px-2.5 whitespace-nowrap">{t("response_prioritization.rank", "Rank")}</th>
-                      <th className="py-2 px-2.5 whitespace-nowrap">{t("response_prioritization.zone", "Zone")}</th>
-                      <th className="py-2 px-2.5 whitespace-nowrap">{t("response_prioritization.score", "Score")}</th>
-                      <th className="py-2 px-2.5 whitespace-nowrap">{t("response_prioritization.road_cutoff", "Roads")}</th>
-                      <th className="py-2 px-2.5 text-right">{t("common.action", "Action")}</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border/60">
-                    {(prioritizationData?.rankedZones ?? []).slice(0, 4).map((item) => (
-                      <tr key={item.zoneId} className="hover:bg-secondary/20 transition-colors">
-                        <td className="py-2.5 px-2.5 font-display font-bold text-foreground text-center">
-                          #{item.rank}
-                        </td>
-                        <td className="py-2.5 px-2.5">
-                          <span className="font-semibold text-foreground block font-display">
-                            {getLocalizedZoneName(item.zoneId, item.zoneName, t)}
-                          </span>
-                          <span className="text-[0.65rem] text-muted-foreground">
-                            {getLocalizedDistrict(item.district, t)}, {getLocalizedState(item.state, t)}
-                          </span>
-                        </td>
-                        <td className="py-2.5 px-2.5 whitespace-nowrap">
-                          <PrioritizationScoreBadge score={item.priorityScore} />
-                        </td>
-                        <td className="py-2.5 px-2.5 whitespace-nowrap">
-                          <RoadBadge status={item.worstRoadStatus} />
-                        </td>
-                        <td className="py-2.5 px-2.5 text-right">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setSelectedId(item.zoneId);
-                              setShowZoneDetails(true);
-                              const el = document.getElementById("risk-map");
-                              if (el) el.scrollIntoView({ behavior: "smooth" });
-                            }}
-                            className="text-xs text-primary font-medium hover:underline cursor-pointer"
-                          >
-                            {t("road_network.view_zone", "View Zone →")}
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                    {(!prioritizationData?.rankedZones || prioritizationData.rankedZones.length === 0) && (
-                      <tr>
-                        <td colSpan={5} className="py-4 text-center text-muted-foreground">
-                          {t("response_prioritization.no_zones", "No prioritised zones available.")}
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            {/* 3. Quick Actions */}
-            <div className="panel p-4">
-              <h2 className="text-base font-bold text-foreground font-display mb-3">
-                {t("quick_actions.title", "Quick Actions")}
-              </h2>
-              <div className="grid grid-cols-2 gap-3">
-                <a
-                  href="#risk-map"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    window.history.pushState(null, "", "/#risk-map");
-                    const el = document.getElementById("risk-map");
-                    if (el) {
-                      el.scrollIntoView({ behavior: "smooth" });
-                    }
-                  }}
-                  className="rounded border border-border bg-surface p-3 hover:bg-secondary/40 transition-colors flex flex-col items-start gap-1 group"
-                >
-                  <MapIcon className="h-5 w-5 text-primary shrink-0" />
-                  <span className="font-display font-bold text-xs text-foreground group-hover:text-primary transition-colors">
-                    {t("quick_actions.view_risk_map", "View Risk Map")}
-                  </span>
-                  <span className="text-[0.68rem] text-muted-foreground leading-tight">
-                    {t("quick_actions.explore_levels", "Explore current risk levels")}
-                  </span>
-                </a>
-
-                <FieldObservationDialog
-                  trigger={
-                    <button
-                      type="button"
-                      className="rounded border border-border bg-surface p-3 hover:bg-secondary/40 transition-colors flex flex-col items-start gap-1 text-left w-full group cursor-pointer"
-                    >
-                      <FilePlus className="h-5 w-5 text-primary shrink-0" />
-                      <span className="font-display font-bold text-xs text-foreground group-hover:text-primary transition-colors">
-                        {t("quick_actions.report_observation", "Report Observation")}
-                      </span>
-                      <span className="text-[0.68rem] text-muted-foreground leading-tight">
-                        {t("quick_actions.submit_field", "Submit a field observation")}
-                      </span>
-                    </button>
-                  }
-                  onSuccess={() => qc.invalidateQueries()}
-                />
-
-                <Link
-                  to="/alerts"
-                  className="rounded border border-border bg-surface p-3 hover:bg-secondary/40 transition-colors flex flex-col items-start gap-1 group"
-                >
-                  <AlertTriangle className="h-5 w-5 text-amber-500 shrink-0" />
-                  <span className="font-display font-bold text-xs text-foreground group-hover:text-amber-500 transition-colors">
-                    {t("quick_actions.view_alerts", "View Alerts")}
-                  </span>
-                  <span className="text-[0.68rem] text-muted-foreground leading-tight">
-                    {t("quick_actions.latest_warnings", "Latest warnings and advisories")}
-                  </span>
-                </Link>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setRoadDialogOpen(true);
-                    window.history.pushState(null, "", "/#road-connectivity");
-                    const el = document.getElementById("road-connectivity");
-                    if (el) el.scrollIntoView({ behavior: "smooth" });
-                  }}
-                  className="rounded border border-border bg-surface p-3 hover:bg-secondary/40 transition-colors flex flex-col items-start gap-1 text-left group cursor-pointer"
-                >
-                  <RouteIcon className="h-5 w-5 text-primary shrink-0" />
-                  <span className="font-display font-bold text-xs text-foreground group-hover:text-primary transition-colors">
-                    {t("quick_actions.check_roads", "Check Roads")}
-                  </span>
-                  <span className="text-[0.68rem] text-muted-foreground leading-tight">
-                    {t("quick_actions.critical_links", "Critical and vulnerable links")}
-                  </span>
                 </button>
               </div>
             </div>
