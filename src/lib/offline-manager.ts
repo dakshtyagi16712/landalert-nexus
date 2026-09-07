@@ -558,7 +558,7 @@ export function useOfflineQueue() {
     syncStatus = "SYNCING";
   } else if (syncError) {
     syncStatus = "SYNC FAILED";
-  } else if (!effectiveOnline) {
+  } else if (!isOnline) {
     syncStatus = queueCount > 0 ? "PENDING SYNC" : "OFFLINE";
   } else {
     if (queueCount > 0) {
@@ -571,7 +571,8 @@ export function useOfflineQueue() {
   }
 
   return {
-    isOnline: effectiveOnline,
+    isOnline,
+    effectiveOnline,
     apiReachable,
     checkHealth,
     queueCount,

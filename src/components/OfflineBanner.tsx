@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import {
   useOfflineQueue,
+  useOnlineStatus,
   getCachedOfflinePackage,
   downloadAndCacheOfflinePackage,
   type CachedBundleStatus,
@@ -11,7 +12,8 @@ import { SyncQueueDialog } from "./SyncQueueDialog";
 
 export function OfflineBanner() {
   const { t } = useTranslation();
-  const { isOnline, queueCount, syncing, syncStatus, syncError, triggerSync } = useOfflineQueue();
+  const { queueCount, syncing, syncStatus, syncError, triggerSync } = useOfflineQueue();
+  const isOnline = useOnlineStatus();
   const [cachedStatus, setCachedStatus] = useState<CachedBundleStatus | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [bannerNotice, setBannerNotice] = useState<string | null>(null);
