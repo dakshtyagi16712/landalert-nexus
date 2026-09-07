@@ -134,7 +134,7 @@ export type OfficialVerificationStatus =
 export function evaluateEmailDomain(email: string): {
   isInstitutional: boolean;
   institutionInfo?: InstitutionalDomain | undefined;
-  suggestedStatus: OfficialVerificationStatus;
+  suggestedStatus: UserProfileVerificationStatus;
   suggestedRole: AppUserRole;
 } {
   const parts = email.toLowerCase().trim().split("@");

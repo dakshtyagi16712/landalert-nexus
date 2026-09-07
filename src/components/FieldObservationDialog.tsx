@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import {
   Dialog,
   DialogContent,
@@ -23,10 +23,12 @@ import { submitFieldObservationsServerFn } from "@/lib/monitoring.functions";
 import type { FieldObservationInput } from "@/lib/sync.service";
 import { supabase } from "@/integrations/supabase/client";
 import { getUserAuthorizationState } from "@/lib/auth-domains";
-import { Camera as CapCamera, CameraResultType, CameraSource } from "@capacitor/camera";
+import { Camera, Video, Upload } from "lucide-react";
+import { ObservationCameraModal } from "@/components/ObservationCameraModal";
 import { useUserLocation } from "@/hooks/useUserLocation";
 import { extractReportType } from "@/lib/locals-escalation.service";
 import { useTranslation } from "react-i18next";
+import { getLocalizedZoneName, getLocalizedDistrict, getLocalizedState } from "@/lib/geo-translations";
 
 interface Props {
   initialZoneId?: number;
@@ -172,8 +174,11 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
   const [gpsZoneMessage, setGpsZoneMessage] = useState<string | null>(null);
 
   const currentDistrictZones = useMemo(() => {
-    return getZonesByDistrict(selectedDistrict);
-  }, [selectedDistrict]);
+    const list = getZonesByDistrict(selectedDistrict);
+    if (list.length > 0) return list;
+    const stateZones = getAllZones().filter((z) => z.state.toLowerCase() === selectedState.toLowerCase());
+    return stateZones.length > 0 ? stateZones : getAllZones();
+  }, [selectedDistrict, selectedState]);
 
   const handleStateChange = (newState: string) => {
     setSelectedState(newState);
@@ -181,7 +186,12 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
     const firstDistrict = districts[0]?.name || "";
     setSelectedDistrict(firstDistrict);
     const districtZones = getZonesByDistrict(firstDistrict);
-    setZoneId(districtZones.length > 0 ? districtZones[0]!.id : null);
+    if (districtZones.length > 0) {
+      setZoneId(districtZones[0]!.id);
+    } else {
+      const stateZones = getAllZones().filter((z) => z.state.toLowerCase() === newState.toLowerCase());
+      setZoneId(stateZones.length > 0 ? stateZones[0]!.id : 1);
+    }
     setGpsZoneMessage(null);
     setFieldErrors((prev) => ({ ...prev, zone: undefined as string | undefined, general: undefined as string | undefined }));
   };
@@ -189,7 +199,12 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
   const handleDistrictChange = (newDistrict: string) => {
     setSelectedDistrict(newDistrict);
     const districtZones = getZonesByDistrict(newDistrict);
-    setZoneId(districtZones.length > 0 ? districtZones[0]!.id : null);
+    if (districtZones.length > 0) {
+      setZoneId(districtZones[0]!.id);
+    } else {
+      const stateZones = getAllZones().filter((z) => z.state.toLowerCase() === selectedState.toLowerCase());
+      setZoneId(stateZones.length > 0 ? stateZones[0]!.id : 1);
+    }
     setGpsZoneMessage(null);
     setFieldErrors((prev) => ({ ...prev, zone: undefined as string | undefined, general: undefined as string | undefined }));
   };
@@ -230,69 +245,82 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
     }
   };
 
-  // Native Camera capture helper
-  async function handleNativeCameraCapture() {
+  // 4. Media Upload (Photo/Video) & Camera System
+  const [mediaList, setMediaList] = useState<MediaItem[]>([]);
+  const [fileError, setFileError] = useState<string | null>(null);
+  const [cameraModalOpen, setCameraModalOpen] = useState(false);
+  const [cameraModalMode, setCameraModalMode] = useState<"photo" | "video">("photo");
+  const directPhotoInputRef = useRef<HTMLInputElement | null>(null);
+  const directVideoInputRef = useRef<HTMLInputElement | null>(null);
+
+  const processCapturedFile = async (file: File) => {
     if (mediaList.length >= 3) {
       setFileError(t("field_observation.error_max_files", "Maximum 3 files allowed per observation"));
       return;
     }
     setFileError(null);
-    try {
-      const image = await CapCamera.getPhoto({
-        quality: 85,
-        allowEditing: false,
-        resultType: CameraResultType.Base64,
-        source: CameraSource.Prompt,
-      });
 
-      if (!image.base64String) return;
+    const isImg = file.type.startsWith("image/") || /\.(jpe?g|png|webp|heic)$/i.test(file.name);
+    const isVid = file.type.startsWith("video/") || /\.(mp4|webm|mov)$/i.test(file.name);
 
-      const mimeType = image.format ? `image/${image.format}` : "image/jpeg";
-      const base64Data = `data:${mimeType};base64,${image.base64String}`;
+    if (!isImg && !isVid) {
+      setFileError(
+        t(
+          "field_observation.error_format",
+          `Unsupported format: ${file.name}. Allowed: JPG, PNG, WEBP, MP4, MOV, WEBM.`
+        )
+      );
+      return;
+    }
+    if (isImg && file.size > 10 * 1024 * 1024) {
+      setFileError(t("field_observation.error_photo_size", `Image ${file.name} exceeds 10MB limit.`));
+      return;
+    }
+    if (isVid && file.size > 50 * 1024 * 1024) {
+      setFileError(t("field_observation.error_video_size", `Video ${file.name} exceeds 50MB limit.`));
+      return;
+    }
 
-      // Calculate approximate size in bytes from base64 string
-      const sizeInBytes = Math.round((image.base64String.length * 3) / 4);
-      if (sizeInBytes > 10 * 1024 * 1024) {
-        setFileError(t("field_observation.error_photo_size", "Captured photo exceeds 10MB limit."));
-        return;
-      }
-
-      // Create a File object for consistent upload pipeline
-      const byteCharacters = atob(image.base64String);
-      const byteNumbers = new Array(byteCharacters.length);
-      for (let i = 0; i < byteCharacters.length; i++) {
-        byteNumbers[i] = byteCharacters.charCodeAt(i);
-      }
-      const byteArray = new Uint8Array(byteNumbers);
-      const blob = new Blob([byteArray], { type: mimeType });
-      const filename = `camera_${Date.now()}.${image.format ?? "jpg"}`;
-      const file = new File([blob], filename, { type: mimeType });
-
-      setMediaList((prev) => [
-        ...prev,
-        {
-          file,
-          previewUrl: base64Data,
-          name: filename,
-          size: sizeInBytes,
-          mimeType,
-          base64Data,
-        },
-      ]);
-
-      if (!geoLat) {
-        captureGps();
-      }
-    } catch (err: any) {
-      if (err?.message !== "User cancelled photos app") {
-        setFileError(`Camera error: ${err?.message ?? "Capture failed"}`);
+    let base64Data = "";
+    if (isImg && file.size <= 2 * 1024 * 1024) {
+      try {
+        base64Data = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve((reader.result as string) || "");
+          reader.onerror = () => resolve("");
+          reader.readAsDataURL(file);
+        });
+      } catch {
+        base64Data = "";
       }
     }
-  }
 
-  // 4. Media Upload (Photo/Video)
-  const [mediaList, setMediaList] = useState<MediaItem[]>([]);
-  const [fileError, setFileError] = useState<string | null>(null);
+    setMediaList((prev) => [
+      ...prev,
+      {
+        file,
+        previewUrl: URL.createObjectURL(file),
+        name: file.name,
+        size: file.size,
+        mimeType: file.type || (isImg ? "image/jpeg" : "video/mp4"),
+        base64Data,
+      },
+    ]);
+
+    if (!geoLat) {
+      captureGps();
+    }
+  };
+
+  const openCamera = (mode: "photo" | "video") => {
+    if (mediaList.length >= 3) {
+      setFileError(t("field_observation.error_max_files", "Maximum 3 files allowed per observation"));
+      return;
+    }
+    setFileError(null);
+    setCameraModalMode(mode);
+    setCameraModalOpen(true);
+  };
 
   async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
     setFileError(null);
@@ -392,12 +420,13 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
 
     const hasRain = rainfallMm.trim() !== "" && !isNaN(Number(rainfallMm));
     const hasSigns = visualSigns !== "None";
-    const hasRoad = roadStatus !== "open";
+    const hasRoad = Boolean(roadStatus);
+    const hasSoil = Boolean(soilCondition);
     const hasMedia = mediaList.length > 0;
     const hasGeo = geoLat !== null;
 
-    if (!hasRain && !hasSigns && !hasRoad && !hasMedia && !hasGeo) {
-      newErrors.general = t("field_observation.error_empty", "Empty observation: At least one field observation signal (rainfall mm, slope signs, road status, ground photo, or GPS reading) must be provided.");
+    if (!hasRain && !hasSigns && !hasRoad && !hasSoil && !hasMedia && !hasGeo) {
+      newErrors.general = t("field_observation.error_empty", "Empty observation: At least one field observation signal (rainfall mm, soil condition, slope signs, road status, ground photo, or GPS reading) must be provided.");
     }
 
     if (Object.keys(newErrors).length > 0) {
@@ -541,42 +570,64 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
 
     try {
       const fullRecord = queueObservation(record);
+      const isEffectiveOffline =
+        (typeof navigator !== "undefined" && !navigator.onLine) ||
+        !isOnline ||
+        connectivityState === "api_unavailable";
 
-      if (!isOnline || connectivityState === "api_unavailable") {
+      if (isEffectiveOffline) {
         setStatusMessage({
           type: "offline",
-          text: t("field_observation.offline_queued", "Device offline/API unavailable. Observation preserved in local offline queue; will sync automatically upon reconnection."),
+          text: t("field_observation.offline_queued", "Observation saved offline — will sync when connectivity returns."),
         });
         setTimeout(() => {
           setOpen(false);
           setStatusMessage(null);
           onSuccess?.();
-        }, 2200);
+        }, 1800);
       } else {
-        const res = await submitFieldObservationsServerFn({
-          data: { observations: [fullRecord] },
-        });
+        try {
+          const res = await submitFieldObservationsServerFn({
+            data: { observations: [fullRecord] },
+          });
 
-        if (res.success && res.syncedCount > 0) {
-          pruneQueue([fullRecord.idempotency_key].filter((k): k is string => k !== undefined));
-          const trustNotice =
-            userRole === "PUBLIC_USER"
-              ? t("field_observation.trust_notice_citizen", "Submitted for official review (unverified citizen signal).")
-              : t("field_observation.trust_notice_official", "Submitted with official authority credentials.");
+          if (res.success && res.syncedCount > 0) {
+            pruneQueue([fullRecord.idempotency_key].filter((k): k is string => k !== undefined));
+            const trustNotice =
+              userRole === "PUBLIC_USER"
+                ? t("field_observation.trust_notice_citizen", "Submitted for official review (unverified citizen signal).")
+                : t("field_observation.trust_notice_official", "Submitted with official authority credentials.");
+            setStatusMessage({
+              type: "success",
+              text: t("field_observation.success_notice", "Observation for Zone {{zoneId}} submitted. {{trustNotice}}", { zoneId, trustNotice }),
+            });
+            setTimeout(() => {
+              setOpen(false);
+              setStatusMessage(null);
+              onSuccess?.();
+            }, 1800);
+          } else {
+            setStatusMessage({
+              type: "offline",
+              text: t("field_observation.offline_queued", "Server sync pending; observation preserved in local offline queue."),
+            });
+            setTimeout(() => {
+              setOpen(false);
+              setStatusMessage(null);
+              onSuccess?.();
+            }, 1800);
+          }
+        } catch (netErr) {
+          console.warn("[FieldObservationDialog] Network sync attempt failed, preserved offline:", netErr);
           setStatusMessage({
-            type: "success",
-            text: t("field_observation.success_notice", "Observation for Zone {{zoneId}} submitted. {{trustNotice}}", { zoneId, trustNotice }),
+            type: "offline",
+            text: t("field_observation.network_error", "Network offline. Observation safely preserved in offline queue; will sync upon reconnection."),
           });
           setTimeout(() => {
             setOpen(false);
             setStatusMessage(null);
             onSuccess?.();
           }, 1800);
-        } else {
-          setStatusMessage({
-            type: "error",
-            text: res.errors?.[0] || "Server sync failed; observation preserved in offline queue.",
-          });
         }
       }
     } catch (err) {
@@ -585,13 +636,19 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
         type: "offline",
         text: t("field_observation.network_error", "Network error encountered. Observation preserved in offline queue."),
       });
+      setTimeout(() => {
+        setOpen(false);
+        setStatusMessage(null);
+        onSuccess?.();
+      }, 1800);
     } finally {
       setSubmitting(false);
     }
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <>
+      <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         {trigger ?? (
           <Button
@@ -675,7 +732,7 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
                   <SelectContent className="bg-surface border-border max-h-60 z-[150]">
                     {Object.keys(NER_GEOGRAPHY).map((st) => (
                       <SelectItem key={st} value={st} className="text-xs font-mono">
-                        {st}
+                        {getLocalizedState(st, t)}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -694,7 +751,7 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
                   <SelectContent className="bg-surface border-border max-h-60 z-[150]">
                     {(NER_GEOGRAPHY[selectedState]?.districts || []).map((dst) => (
                       <SelectItem key={dst} value={dst} className="text-xs font-mono">
-                        {dst}
+                        {getLocalizedDistrict(dst, t)}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -710,8 +767,8 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
                 </Label>
                 <span className="text-[0.62rem] text-muted-foreground">
                   {currentDistrictZones.length > 0
-                    ? `${currentDistrictZones.length} active station(s) in ${selectedDistrict}`
-                    : `District-level coverage (${selectedDistrict})`}
+                    ? `${currentDistrictZones.length} active station(s) in ${getLocalizedDistrict(selectedDistrict, t)}`
+                    : `District-level coverage (${getLocalizedDistrict(selectedDistrict, t)})`}
                 </span>
               </div>
 
@@ -729,7 +786,7 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
                   <SelectContent className="bg-surface border-border max-h-60 z-[150]">
                     {currentDistrictZones.map((z) => (
                       <SelectItem key={z.id} value={String(z.id)} className="text-xs font-mono">
-                        Zone {z.id}: {z.name} ({z.district}, {z.state})
+                        Zone {z.id}: {getLocalizedZoneName(z.id, z.name, t)} ({getLocalizedDistrict(z.district, t)}, {getLocalizedState(z.state, t)})
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -740,7 +797,7 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
                     {t("field_observation.no_zone_registered", "No active monitored risk zone currently registered.")}
                   </span>
                   <span className="text-[0.68rem] text-muted-foreground font-mono">
-                    {selectedDistrict}
+                    {getLocalizedDistrict(selectedDistrict, t)}
                   </span>
                 </div>
               )}
@@ -854,8 +911,53 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
               </span>
             </div>
 
-            <div className="flex gap-2">
-              <Input
+            <div className="space-y-2">
+              <div className="grid grid-cols-3 gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  aria-label={t("field_observation.camera_take_photo", "📷 Photo")}
+                  disabled={submitting || mediaList.length >= 3}
+                  onClick={() => openCamera("photo")}
+                  className="font-mono text-xs flex items-center justify-center gap-1.5 bg-secondary/40 hover:bg-secondary/70 border-border h-9"
+                  title={t("field_observation.camera_photo_title", "Open camera to capture photos")}
+                >
+                  <Camera className="h-4 w-4 text-primary" />
+                  <span>{t("field_observation.camera_take_photo", "📷 Photo")}</span>
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  aria-label={t("field_observation.camera_record_video", "🎥 Video")}
+                  disabled={submitting || mediaList.length >= 3}
+                  onClick={() => openCamera("video")}
+                  className="font-mono text-xs flex items-center justify-center gap-1.5 bg-secondary/40 hover:bg-secondary/70 border-border h-9"
+                  title={t("field_observation.camera_video_title", "Open camera to record video")}
+                >
+                  <Video className="h-4 w-4 text-red-500" />
+                  <span>{t("field_observation.camera_record_video", "🎥 Video")}</span>
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  aria-label={t("field_observation.choose_files", "📁 Files")}
+                  disabled={submitting || mediaList.length >= 3}
+                  onClick={() => document.getElementById("fieldMediaUploadInput")?.click()}
+                  className="font-mono text-xs flex items-center justify-center gap-1.5 bg-secondary/40 hover:bg-secondary/70 border-border h-9"
+                  title={t("field_observation.choose_files_title", "Choose photos or videos from device storage")}
+                >
+                  <Upload className="h-4 w-4 text-muted-foreground" />
+                  <span>{t("field_observation.choose_files", "📁 Files")}</span>
+                </Button>
+              </div>
+
+              {/* Hidden file input for file selection from device storage */}
+              <input
                 id="fieldMediaUploadInput"
                 aria-label={t("field_observation.media_title", "Field Media (Photos / Video)")}
                 type="file"
@@ -863,20 +965,34 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
                 multiple
                 disabled={submitting || mediaList.length >= 3}
                 onChange={handleFileSelect}
-                className="bg-secondary/40 border-border font-mono text-xs file:font-mono file:text-xs file:bg-primary/20 file:text-primary file:border-0 file:rounded cursor-pointer flex-1"
+                className="hidden"
               />
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                aria-label={t("field_observation.camera_button", "📷 Camera")}
-                disabled={submitting || mediaList.length >= 3}
-                onClick={handleNativeCameraCapture}
-                className="font-mono text-xs shrink-0"
-                title={t("field_observation.camera_title", "Capture photo using device camera or gallery")}
-              >
-                {t("field_observation.camera_button", "📷 Camera")}
-              </Button>
+
+              {/* Hidden direct mobile device camera capture inputs */}
+              <input
+                ref={directPhotoInputRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) processCapturedFile(f);
+                  e.target.value = "";
+                }}
+              />
+              <input
+                ref={directVideoInputRef}
+                type="file"
+                accept="video/*"
+                capture="environment"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) processCapturedFile(f);
+                  e.target.value = "";
+                }}
+              />
             </div>
 
             {fileError && <p className="text-[0.7rem] text-destructive font-mono">{fileError}</p>}
@@ -1042,5 +1158,13 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
         </form>
       </DialogContent>
     </Dialog>
+
+    <ObservationCameraModal
+      open={cameraModalOpen}
+      onOpenChange={setCameraModalOpen}
+      initialMode={cameraModalMode}
+      onCapture={processCapturedFile}
+    />
+  </>
   );
 }

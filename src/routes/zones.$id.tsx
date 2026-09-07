@@ -1,8 +1,15 @@
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 import { queryOptions, useSuspenseQuery, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import {
+  getLocalizedZoneName,
+  getLocalizedDistrict,
+  getLocalizedState,
+} from "@/lib/geo-translations";
 import { getUserAuthorizationState } from "@/lib/official-auth.service";
+import { scoreZonePrioritization } from "@/lib/prioritization.service";
+import { cn } from "@/lib/utils";
 import {
   Area,
   AreaChart,
@@ -36,6 +43,7 @@ import { PanelSkeleton, RouteError } from "@/components/ConsoleShell";
 import { FieldObservationDialog } from "@/components/FieldObservationDialog";
 import { intensityThresholdMmPerDay, moistureThresholdMm, riskColor } from "@/lib/risk";
 import { Button } from "@/components/ui/button";
+import { ShieldAlert, Lock } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { supabase } from "@/integrations/supabase/client";
 import {
@@ -55,10 +63,75 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
+interface ExposureSummary {
+  zoneId: number;
+  villageCount: number;
+  estimatedPopulationExposed: number;
+  populationDataCompleteness: number;
+  villagesWithPopulationData: number;
+  infrastructureCount: number;
+  infrastructureByType: {
+    hospital: number;
+    clinic: number;
+    school: number;
+    bridge: number;
+    power: number;
+  };
+  nearestVillage: {
+    name: string;
+    distance_km: number;
+  } | null;
+  nearestInfrastructure: {
+    name: string;
+    type: string;
+    distance_km: number;
+  } | null;
+}
+
+import { getZoneById } from "@/lib/geography";
+
 const zoneQuery = (id: number) =>
   queryOptions({
     queryKey: ["zone", id],
-    queryFn: () => getZoneDetail({ data: { id } }),
+    networkMode: "always",
+    queryFn: async () => {
+      try {
+        return await getZoneDetail({ data: { id } });
+      } catch (err) {
+        const z = getZoneById(id);
+        if (z) {
+          return {
+            zone: {
+              id: z.id,
+              zone_name: z.name,
+              state: z.state,
+              district: z.district,
+              risk_score: 0,
+              current_risk_level: "UNKNOWN" as const,
+              antecedent_rainfall_mm: null,
+              intensity_rainfall_mm: null,
+              soil_moisture_pct: null,
+              dominant_slope_deg: 25,
+              critical_facilities_count: 0,
+              population_density: 0,
+              last_updated_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+              created_at: new Date().toISOString(),
+              explanation: "Offline View: Live server risk calculation unavailable. Field reporting active.",
+              scientific_limitation: "OFFLINE_CACHED_VIEW",
+            } as any,
+            readings: [],
+            roads: [],
+            slides: [],
+            alerts: [],
+            activeModel: null,
+            observations: [],
+          };
+        }
+        throw notFound();
+      }
+    },
+    staleTime: 60 * 1000,
   });
 
 export const Route = createFileRoute("/zones/$id")({
@@ -94,7 +167,7 @@ export const Route = createFileRoute("/zones/$id")({
 });
 
 function ZonePage() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { id } = Route.useParams();
   const { data } = useSuspenseQuery(zoneQuery(Number(id)));
   const qc = useQueryClient();
@@ -110,6 +183,114 @@ function ZonePage() {
     queryFn: () => getZoneWeatherRiskForecastServerFn({ data: { zoneId: Number(id) } }),
   });
 
+  const {
+    data: exposureSummary,
+    isLoading: exposureLoading,
+    error: exposureError,
+  } = useQuery<ExposureSummary>({
+    queryKey: ["infrastructure-summary", Number(id)],
+    queryFn: async () => {
+      const res = await fetch(`/api/infrastructure/summary?zoneId=${Number(id)}`);
+      if (!res.ok) {
+        throw new Error(`Failed to load exposure summary (status ${res.status})`);
+      }
+      return res.json();
+    },
+  });
+
+  const authoritativeRiskLevel = mlPrediction?.risk_level ?? zone.current_risk_level;
+  const authoritativeRiskScore = mlPrediction?.risk_score ?? zone.risk_score;
+
+  const affectedRoadSegments = useMemo(() => {
+    return (data.roads ?? []).filter(
+      (r) => r.status === "blocked" || r.status === "restricted",
+    );
+  }, [data.roads]);
+
+  const blockedRoads = useMemo(() => {
+    return affectedRoadSegments.filter((r) => r.status === "blocked");
+  }, [affectedRoadSegments]);
+
+  const prioritizationResult = useMemo(() => {
+    return scoreZonePrioritization({
+      zoneId: zone.id,
+      zoneName: zone.zone_name,
+      district: zone.district,
+      state: zone.state,
+      currentRiskLevel: authoritativeRiskLevel,
+      population: zone.population,
+      roadSegments: (data.roads ?? []).map((r) => ({
+        id: r.id,
+        roadName: r.road_name,
+        segmentLabel: r.segment_label,
+        status: r.status,
+      })),
+      fieldObservations: (data.observations ?? []).map((o: any) => ({
+        id: o.id,
+        reviewStatus: o.review_status ?? undefined,
+        roadStatus: o.road_status ?? undefined,
+        visualSigns: o.visual_signs ?? undefined,
+        rainfallMm: o.rainfall_mm ?? undefined,
+      })),
+    });
+  }, [zone, authoritativeRiskLevel, data.roads, data.observations]);
+
+  const priorityTier = useMemo(() => {
+    if (!prioritizationResult) {
+      return {
+        label: "UNRANKED",
+        sublabel: "Awaiting Telemetry",
+        toneClass: "border-border text-muted-foreground bg-secondary/50",
+      };
+    }
+    const s = prioritizationResult.score;
+    if (s >= 70) {
+      return {
+        label: "CRITICAL",
+        sublabel: "Immediate Operational Urgency",
+        toneClass: "border-risk-severe/50 bg-risk-severe/15 text-risk-severe",
+      };
+    }
+    if (s >= 50) {
+      return {
+        label: "HIGH",
+        sublabel: "Elevated Response Priority",
+        toneClass: "border-risk-high/50 bg-risk-high/15 text-risk-high",
+      };
+    }
+    if (s >= 30) {
+      return {
+        label: "MODERATE",
+        sublabel: "Advisory Monitoring",
+        toneClass: "border-risk-moderate/50 bg-risk-moderate/15 text-risk-moderate",
+      };
+    }
+    return {
+      label: "LOW",
+      sublabel: "Routine Preparedness",
+      toneClass: "border-risk-low/50 bg-risk-low/15 text-risk-low",
+    };
+  }, [prioritizationResult]);
+
+  const recommendedAction = useMemo(() => {
+    if (authoritativeRiskLevel === "UNKNOWN") {
+      return "Telemetry unavailable: dispatch ground reconnaissance team for visual verification before issuing public advisories.";
+    }
+    if (authoritativeRiskLevel === "Severe" || authoritativeRiskLevel === "High") {
+      if (blockedRoads.length > 0) {
+        return `High slope hazard with confirmed road blockage (${blockedRoads.map((r) => r.road_name).join(", ")}). Avoid transit along compromised corridors and alert district control room.`;
+      }
+      return `${authoritativeRiskLevel.toUpperCase()} landslide risk in ${zone.zone_name}. Avoid slope-cut roads. Report cracks or slumping to your district control room.`;
+    }
+    if (authoritativeRiskLevel === "Moderate") {
+      return `Moderate hazard advisory for ${zone.zone_name}. Monitor hillside drainage and maintain vigilance along road corridors.`;
+    }
+    if (authoritativeRiskLevel === "Low") {
+      return `Baseline conditions in ${zone.zone_name}. Maintain standard telemetry monitoring.`;
+    }
+    return null;
+  }, [authoritativeRiskLevel, zone.zone_name, blockedRoads]);
+
   const [alertOpen, setAlertOpen] = useState(false);
   const [alertLang, setAlertLang] = useState<"en" | "as" | "bn" | "ne">("en");
   const [alertChannel, setAlertChannel] = useState<"sms" | "push" | "both">("both");
@@ -117,15 +298,33 @@ function ZonePage() {
   const [dispatching, setDispatching] = useState(false);
   const [dispatchStatus, setDispatchStatus] = useState<string | null>(null);
   const [viewerRole, setViewerRole] = useState<string>("PUBLIC_USER");
+  const [dispatchAuthorized, setDispatchAuthorized] = useState<boolean>(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user?.email) {
-        const authState = getUserAuthorizationState({ email: session.user.email, user_metadata: session.user.user_metadata });
+      if (session?.user) {
+        const authState = getUserAuthorizationState({ email: session.user.email ?? "", user_metadata: session.user.user_metadata });
         setViewerRole(authState.role);
+        setDispatchAuthorized(Boolean(session.user.user_metadata?.["dispatch_authorized"]));
       }
     });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        const authState = getUserAuthorizationState({ email: session.user.email ?? "", user_metadata: session.user.user_metadata });
+        setViewerRole(authState.role);
+        setDispatchAuthorized(Boolean(session.user.user_metadata?.["dispatch_authorized"]));
+      } else {
+        setViewerRole("PUBLIC_USER");
+        setDispatchAuthorized(false);
+      }
+    });
+    return () => subscription.unsubscribe();
   }, []);
+
+  const isSecurityOfficial =
+    viewerRole === "DISPATCHER" ||
+    viewerRole === "ADMIN" ||
+    (viewerRole === "VERIFIED_OFFICIAL" && dispatchAuthorized);
 
   const daily = aggregateDaily(data.readings);
   const iThr = intensityThresholdMmPerDay(3);
@@ -137,6 +336,10 @@ function ZonePage() {
   const r30 = data.readings.reduce((s, r) => s + r.rainfall_mm, 0);
 
   async function handleDispatchAlert() {
+    if (!isSecurityOfficial) {
+      setDispatchStatus("Forbidden: Security alerts can only be generated by authorized security officials.");
+      return;
+    }
     setDispatching(true);
     setDispatchStatus(null);
     try {
@@ -192,140 +395,176 @@ function ZonePage() {
             <DialogTrigger asChild>
               <Button
                 variant={
-                  ["High", "Severe"].includes(zone.current_risk_level) ? "destructive" : "secondary"
+                  !isSecurityOfficial
+                    ? "outline"
+                    : ["High", "Severe"].includes(zone.current_risk_level)
+                    ? "destructive"
+                    : "secondary"
                 }
                 size="sm"
-                className="font-mono text-xs uppercase tracking-wider"
+                className="font-mono text-xs uppercase tracking-wider gap-1.5"
               >
+                {!isSecurityOfficial && <Lock className="h-3.5 w-3.5 text-muted-foreground" />}
                 {t("alerts.dispatch_alert")}
               </Button>
             </DialogTrigger>
             <DialogContent className="sm:max-w-[480px] bg-surface text-foreground border-border">
               <DialogHeader>
                 <DialogTitle className="text-xl font-display uppercase tracking-wide">
-                  {t("alerts.dispatch_alert")}: {zone.zone_name}
+                  {t("alerts.dispatch_alert")}: {getLocalizedZoneName(zone.id, zone.zone_name, t)}
                 </DialogTitle>
                 <DialogDescription className="text-xs text-muted-foreground">
                   {t("alerts.dispatcher_decision_notice")}
                 </DialogDescription>
               </DialogHeader>
 
-              <div className="rounded border border-primary/20 bg-primary/5 p-2.5 text-[0.7rem] font-mono text-muted-foreground">
-                <span className="font-semibold text-primary uppercase tracking-wide">{t("alerts.authority_notice")}: </span>
-                {t("alerts.authority_notice_body")}
-              </div>
-
-              {dispatchStatus && (
-                <div className="rounded border border-primary/40 bg-primary/10 p-3 text-xs font-mono text-primary">
-                  {dispatchStatus}
-                </div>
-              )}
-
-              <div className="space-y-4 pt-1">
-                <div className="flex items-center justify-between rounded border border-border bg-secondary/30 p-3">
-                  <div>
-                    <div className="label-caps text-[0.68rem]">{t("zone_detail.authoritative_risk_level")}</div>
-                    <div className="mt-1 flex items-center gap-2">
-                      <RiskBadge level={mlPrediction?.risk_level ?? zone.current_risk_level} score={mlPrediction?.risk_score ?? zone.risk_score} />
-                      <span className="font-mono text-xs text-muted-foreground">
-                        {t("zone_detail.ml_probability")}:{" "}
-                        {mlPrediction
-                          ? mlPrediction.probability !== null
-                            ? `${(mlPrediction.probability * 100).toFixed(1)}%`
-                            : "Unavailable"
-                          : "Loading…"}
-                      </span>
+              {!isSecurityOfficial ? (
+                <div className="space-y-4 py-2">
+                  <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-center space-y-3">
+                    <ShieldAlert className="h-9 w-9 text-amber-500 mx-auto" />
+                    <div className="font-semibold text-foreground text-sm uppercase font-display tracking-wider">
+                      Security Clearance Required
+                    </div>
+                    <p className="text-xs text-muted-foreground font-mono leading-relaxed">
+                      Emergency and security alerts can only be generated by authorized security officials (State Disaster Management Authorities, District Magistrates, and certified dispatchers).
+                    </p>
+                    <div className="text-[0.7rem] font-mono text-muted-foreground border-t border-amber-500/20 pt-2">
+                      Current account clearance: <span className="font-semibold text-foreground uppercase">{viewerRole}</span> (Restricted)
                     </div>
                   </div>
-                </div>
 
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="grid gap-2">
-                    <label className="text-xs font-mono uppercase text-muted-foreground">
-                      {t("alerts.language")}
-                    </label>
-                    <Select
-                      value={alertLang}
-                      onValueChange={(v) => setAlertLang(v as "en" | "as" | "bn" | "ne")}
+                  <DialogFooter className="mt-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setAlertOpen(false)}
+                      className="w-full font-mono text-xs"
                     >
-                      <SelectTrigger className="bg-secondary/40 border-border font-mono text-xs">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent className="bg-surface border-border">
-                        <SelectItem value="en">English</SelectItem>
-                        <SelectItem value="as">অসমীয়া (Assamese)</SelectItem>
-                        <SelectItem value="bn">বাংলা (Bengali)</SelectItem>
-                        <SelectItem value="ne">नेपाली (Nepali)</SelectItem>
-                      </SelectContent>
-                    </Select>
+                      {t("alerts.cancel")}
+                    </Button>
+                  </DialogFooter>
+                </div>
+              ) : (
+                <>
+                  <div className="rounded border border-primary/20 bg-primary/5 p-2.5 text-[0.7rem] font-mono text-muted-foreground">
+                    <span className="font-semibold text-primary uppercase tracking-wide">{t("alerts.authority_notice")}: </span>
+                    {t("alerts.authority_notice_body")}
                   </div>
 
-                  <div className="grid gap-2">
-                    <label className="text-xs font-mono uppercase text-muted-foreground">
-                      {t("alerts.channel")}
-                    </label>
-                    <Select
-                      value={alertChannel}
-                      onValueChange={(v) => setAlertChannel(v as "sms" | "push" | "both")}
+                  {dispatchStatus && (
+                    <div className="rounded border border-primary/40 bg-primary/10 p-3 text-xs font-mono text-primary">
+                      {dispatchStatus}
+                    </div>
+                  )}
+
+                  <div className="space-y-4 pt-1">
+                    <div className="flex items-center justify-between rounded border border-border bg-secondary/30 p-3">
+                      <div>
+                        <div className="label-caps text-[0.68rem]">{t("zone_detail.authoritative_risk_level")}</div>
+                        <div className="mt-1 flex items-center gap-2">
+                          <RiskBadge level={mlPrediction?.risk_level ?? zone.current_risk_level} score={mlPrediction?.risk_score ?? zone.risk_score} />
+                          <span className="font-mono text-xs text-muted-foreground">
+                            {t("zone_detail.ml_probability")}:{" "}
+                            {mlPrediction
+                              ? mlPrediction.probability !== null
+                                ? `${(mlPrediction.probability * 100).toFixed(1)}%`
+                                : "Unavailable"
+                              : "Loading…"}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="grid gap-2">
+                        <label className="text-xs font-mono uppercase text-muted-foreground">
+                          {t("alerts.language")}
+                        </label>
+                        <Select
+                          value={alertLang}
+                          onValueChange={(v) => setAlertLang(v as "en" | "as" | "bn" | "ne")}
+                        >
+                          <SelectTrigger className="bg-secondary/40 border-border font-mono text-xs">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent className="bg-surface border-border">
+                            <SelectItem value="en">English</SelectItem>
+                            <SelectItem value="as">অসমীয়া (Assamese)</SelectItem>
+                            <SelectItem value="bn">বাংলা (Bengali)</SelectItem>
+                            <SelectItem value="ne">नेपाली (Nepali)</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div className="grid gap-2">
+                        <label className="text-xs font-mono uppercase text-muted-foreground">
+                          {t("alerts.channel")}
+                        </label>
+                        <Select
+                          value={alertChannel}
+                          onValueChange={(v) => setAlertChannel(v as "sms" | "push" | "both")}
+                        >
+                          <SelectTrigger className="bg-secondary/40 border-border font-mono text-xs">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent className="bg-surface border-border">
+                            <SelectItem value="both">{t("alerts.channel_both")}</SelectItem>
+                            <SelectItem value="sms">{t("alerts.channel_sms")}</SelectItem>
+                            <SelectItem value="push">{t("alerts.channel_push")}</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+
+                    <div className="grid gap-2">
+                      <label className="text-xs font-mono uppercase text-muted-foreground">
+                        {t("alerts.justification_required")}
+                      </label>
+                      <Input
+                        type="text"
+                        placeholder="e.g. Field verification and radar confirm high debris-flow hazard"
+                        value={justification}
+                        onChange={(e) => setJustification(e.target.value)}
+                        minLength={8}
+                        required
+                        className="bg-secondary/40 border-border font-mono text-xs"
+                      />
+                    </div>
+
+                    <div className="rounded border border-border/80 bg-secondary/20 p-3 font-mono text-xs space-y-1">
+                      <div className="label-caps text-[0.65rem]">{t("zone_detail.recipient_group")}</div>
+                      <div className="text-foreground">
+                        {t("zone_detail.recipients_desc")}
+                      </div>
+                      <div className="text-[0.68rem] text-muted-foreground">
+                        {t("zone_detail.population_in_coverage")}: {zone.population.toLocaleString("en-IN")}
+                      </div>
+                    </div>
+                  </div>
+
+                  <DialogFooter className="mt-4">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setAlertOpen(false)}
+                      disabled={dispatching}
+                      className="font-mono text-xs"
                     >
-                      <SelectTrigger className="bg-secondary/40 border-border font-mono text-xs">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent className="bg-surface border-border">
-                        <SelectItem value="both">{t("alerts.channel_both")}</SelectItem>
-                        <SelectItem value="sms">{t("alerts.channel_sms")}</SelectItem>
-                        <SelectItem value="push">{t("alerts.channel_push")}</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-
-                <div className="grid gap-2">
-                  <label className="text-xs font-mono uppercase text-muted-foreground">
-                    {t("alerts.justification_required")}
-                  </label>
-                  <Input
-                    type="text"
-                    placeholder="e.g. Field verification and radar confirm high debris-flow hazard"
-                    value={justification}
-                    onChange={(e) => setJustification(e.target.value)}
-                    minLength={8}
-                    required
-                    className="bg-secondary/40 border-border font-mono text-xs"
-                  />
-                </div>
-
-                <div className="rounded border border-border/80 bg-secondary/20 p-3 font-mono text-xs space-y-1">
-                  <div className="label-caps text-[0.65rem]">{t("zone_detail.recipient_group")}</div>
-                  <div className="text-foreground">
-                    {t("zone_detail.recipients_desc")}
-                  </div>
-                  <div className="text-[0.68rem] text-muted-foreground">
-                    {t("zone_detail.population_in_coverage")}: {zone.population.toLocaleString("en-IN")}
-                  </div>
-                </div>
-              </div>
-
-              <DialogFooter className="mt-4">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setAlertOpen(false)}
-                  disabled={dispatching}
-                  className="font-mono text-xs"
-                >
-                  {t("alerts.cancel")}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="destructive"
-                  onClick={handleDispatchAlert}
-                  disabled={dispatching || justification.trim().length < 8}
-                  className="font-mono text-xs uppercase"
-                >
-                  {dispatching ? t("alerts.authorizing") : t("alerts.authorize_dispatch")}
-                </Button>
-              </DialogFooter>
+                      {t("alerts.cancel")}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      onClick={handleDispatchAlert}
+                      disabled={dispatching || justification.trim().length < 8}
+                      className="font-mono text-xs uppercase"
+                    >
+                      {dispatching ? t("alerts.authorizing") : t("alerts.authorize_dispatch")}
+                    </Button>
+                  </DialogFooter>
+                </>
+              )}
             </DialogContent>
           </Dialog>
         </div>
@@ -334,9 +573,9 @@ function ZonePage() {
       <header className="mt-4 flex flex-wrap items-start justify-between gap-4">
         <div>
           <div className="label-caps">{t("zone_detail.zone_brief")}</div>
-          <h1 className="mt-1 text-3xl font-semibold uppercase tracking-wide">{zone.zone_name}</h1>
+          <h1 className="mt-1 text-3xl font-semibold uppercase tracking-wide">{getLocalizedZoneName(zone.id, zone.zone_name, t)}</h1>
           <p className="text-sm text-muted-foreground">
-            {zone.district} district · {zone.state} · {zone.population.toLocaleString("en-IN")}{" "}
+            {getLocalizedDistrict(zone.district, t)} {t("dashboard.district_label", "district")} · {getLocalizedState(zone.state, t)} · {zone.population.toLocaleString(i18n.language || "en-IN")}{" "}
             {t("zone_detail.residents")}
           </p>
           <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
@@ -554,6 +793,264 @@ function ZonePage() {
             </div>
           </div>
         )}
+      </section>
+
+      {/* Community & Infrastructure Exposure and Operational Response Panel */}
+      <section id="zone-exposure-panel" className="mt-4 panel p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 pb-3 mb-4">
+          <div className="flex items-center gap-2">
+            <span className="label-caps">Community & Infrastructure Exposure</span>
+            <span className="rounded border border-sky-500/40 bg-sky-500/10 px-2 py-0.5 font-mono text-[0.65rem] text-sky-400">
+              OSM & Ground Telemetry
+            </span>
+          </div>
+          <span className="text-[0.68rem] text-muted-foreground italic">
+            Decision support for district disaster officers
+          </span>
+        </div>
+
+        {exposureLoading ? (
+          <div className="py-6 text-center text-xs text-muted-foreground font-mono">
+            Loading community and infrastructure exposure data…
+          </div>
+        ) : exposureError ? (
+          <div className="rounded border border-amber-500/40 bg-amber-500/10 p-3 text-xs font-mono text-amber-300">
+            ⚠ Exposure summary unavailable: {exposureError instanceof Error ? exposureError.message : "Network error"}
+          </div>
+        ) : exposureSummary ? (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {/* Card 1: Authoritative Risk Level & Zone Context */}
+            <div className="rounded border border-border/80 bg-card p-3 shadow-xs flex flex-col justify-between">
+              <div>
+                <div className="text-[0.68rem] font-semibold uppercase tracking-wider text-muted-foreground font-mono">
+                  Current Hazard Tier
+                </div>
+                <div className="mt-2 flex items-center justify-between">
+                  <RiskBadge
+                    level={authoritativeRiskLevel}
+                    score={authoritativeRiskScore}
+                  />
+                </div>
+                <div className="mt-3">
+                  <div className="font-display font-bold text-base text-foreground">
+                    {zone.zone_name}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    {zone.district} • {zone.state}
+                  </div>
+                </div>
+              </div>
+              <div className="mt-3 pt-2 border-t border-border/50 text-[0.7rem] text-muted-foreground font-mono">
+                Census zone population:{" "}
+                <span className="text-foreground font-semibold">
+                  {zone.population.toLocaleString("en-IN")}
+                </span>
+              </div>
+            </div>
+
+            {/* Card 2: Community Exposure */}
+            <div className="rounded border border-border/80 bg-card p-3 shadow-xs flex flex-col justify-between">
+              <div>
+                <div className="text-[0.68rem] font-semibold uppercase tracking-wider text-sky-400 font-mono">
+                  Community Exposure
+                </div>
+                <div className="mt-2 space-y-1">
+                  <div className="font-display text-2xl font-bold text-foreground">
+                    {exposureSummary.villageCount}{" "}
+                    <span className="text-sm font-normal text-muted-foreground">
+                      {exposureSummary.villageCount === 1 ? "village" : "villages"}
+                    </span>
+                  </div>
+                  <div className="text-sm font-semibold text-slate-200">
+                    {exposureSummary.populationDataCompleteness < 1 ? (
+                      <>
+                        <div>
+                          {exposureSummary.estimatedPopulationExposed.toLocaleString("en-IN")}{" "}
+                          <span className="font-normal text-xs text-muted-foreground">known population</span>
+                        </div>
+                        <div className="text-[0.7rem] text-muted-foreground font-normal mt-1 leading-snug">
+                          Population data:{" "}
+                          <span className="text-slate-300 font-mono">
+                            {exposureSummary.villagesWithPopulationData} / {exposureSummary.villageCount}
+                          </span>{" "}
+                          villages (
+                          <span className="text-sky-400 font-mono">
+                            {(exposureSummary.populationDataCompleteness * 100).toFixed(1)}%
+                          </span>
+                          )
+                        </div>
+                      </>
+                    ) : (
+                      <div>
+                        {exposureSummary.estimatedPopulationExposed.toLocaleString("en-IN")}{" "}
+                        <span className="font-normal text-xs text-muted-foreground">total population</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+              <div className="mt-3 pt-2 border-t border-border/50 text-[0.68rem] text-muted-foreground">
+                Assigned within 20 km zone buffer
+              </div>
+            </div>
+
+            {/* Card 3: Critical Infrastructure & Nearest Assets */}
+            <div className="rounded border border-border/80 bg-card p-3 shadow-xs flex flex-col justify-between">
+              <div>
+                <div className="text-[0.68rem] font-semibold uppercase tracking-wider text-red-400 font-mono flex items-center justify-between">
+                  <span>Critical Infrastructure</span>
+                  <span className="font-mono text-[0.65rem] text-muted-foreground">
+                    {exposureSummary.infrastructureCount} total
+                  </span>
+                </div>
+                <div className="mt-2 grid grid-cols-2 gap-x-2 gap-y-1 text-xs">
+                  <div className="flex items-center gap-1.5 text-foreground">
+                    <span>🏥</span>
+                    <span>
+                      {exposureSummary.infrastructureByType.hospital}{" "}
+                      {exposureSummary.infrastructureByType.hospital === 1 ? "Hospital" : "Hospitals"}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5 text-foreground">
+                    <span>🩺</span>
+                    <span>
+                      {exposureSummary.infrastructureByType.clinic}{" "}
+                      {exposureSummary.infrastructureByType.clinic === 1 ? "Clinic" : "Clinics"}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5 text-foreground">
+                    <span>🏫</span>
+                    <span>
+                      {exposureSummary.infrastructureByType.school}{" "}
+                      {exposureSummary.infrastructureByType.school === 1 ? "School" : "Schools"}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5 text-foreground">
+                    <span>🌉</span>
+                    <span>
+                      {exposureSummary.infrastructureByType.bridge}{" "}
+                      {exposureSummary.infrastructureByType.bridge === 1 ? "Bridge" : "Bridges"}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5 text-foreground col-span-2">
+                    <span>⚡</span>
+                    <span>
+                      {exposureSummary.infrastructureByType.power} Power
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Nearest Assets */}
+              {(exposureSummary.nearestVillage || exposureSummary.nearestInfrastructure) && (
+                <div className="mt-3 pt-2 border-t border-border/50 space-y-1 text-xs">
+                  <div className="text-[0.65rem] font-bold uppercase tracking-wider text-muted-foreground font-mono">
+                    Nearest Assets
+                  </div>
+                  {exposureSummary.nearestVillage && (
+                    <div className="flex items-baseline justify-between gap-1 text-[0.72rem]">
+                      <span className="text-muted-foreground truncate">
+                        Village: <span className="text-foreground font-medium">{exposureSummary.nearestVillage.name}</span>
+                      </span>
+                      <span className="font-mono text-[0.7rem] text-sky-400 shrink-0">
+                        {exposureSummary.nearestVillage.distance_km.toFixed(2)} km
+                      </span>
+                    </div>
+                  )}
+                  {exposureSummary.nearestInfrastructure && (
+                    <div className="flex items-baseline justify-between gap-1 text-[0.72rem]">
+                      <span className="text-muted-foreground truncate">
+                        {exposureSummary.nearestInfrastructure.type ? (
+                          <span className="capitalize">{exposureSummary.nearestInfrastructure.type}: </span>
+                        ) : "Facility: "}
+                        <span className="text-foreground font-medium">{exposureSummary.nearestInfrastructure.name}</span>
+                      </span>
+                      <span className="font-mono text-[0.7rem] text-amber-400 shrink-0">
+                        {exposureSummary.nearestInfrastructure.distance_km.toFixed(2)} km
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Card 4: Response Priority & Recommended Action */}
+            <div className="rounded border border-border/80 bg-card p-3 shadow-xs flex flex-col justify-between">
+              <div>
+                <div className="text-[0.68rem] font-semibold uppercase tracking-wider text-primary font-mono flex items-center justify-between">
+                  <span>Response Priority</span>
+                  {prioritizationResult && (
+                    <span className="font-mono text-[0.65rem] text-muted-foreground">
+                      Score: <span className="font-bold text-foreground">{prioritizationResult.score.toFixed(1)}</span>/100
+                    </span>
+                  )}
+                </div>
+                <div className="mt-2 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={cn(
+                        "inline-flex items-center rounded border px-2 py-0.5 font-display text-xs font-bold uppercase tracking-wider",
+                        priorityTier.toneClass,
+                      )}
+                    >
+                      {priorityTier.label}
+                    </span>
+                    <span className="text-[0.7rem] text-muted-foreground">
+                      {priorityTier.sublabel}
+                    </span>
+                  </div>
+
+                  {/* Top Drivers from Authoritative Prioritization */}
+                  {prioritizationResult?.breakdown?.topContributingDrivers && (
+                    <div className="text-[0.68rem] text-muted-foreground font-mono space-y-0.5">
+                      {prioritizationResult.breakdown.topContributingDrivers.slice(0, 2).map((driver, idx) => (
+                        <div key={idx} className="flex items-start gap-1">
+                          <span className="text-primary mt-0.5">•</span>
+                          <span className="leading-tight">{driver}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Road Impact (only when backed by real road data) */}
+                  {affectedRoadSegments.length > 0 && (
+                    <div className="text-[0.7rem] font-mono pt-1.5 border-t border-border/50">
+                      <div className="text-muted-foreground">
+                        Affected road segments:{" "}
+                        <span className="font-bold text-foreground">
+                          {affectedRoadSegments.length}
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {affectedRoadSegments.map((r) => (
+                          <span
+                            key={r.id}
+                            className="inline-flex items-center gap-1 text-[0.62rem] rounded bg-secondary/50 px-1 py-0.5 border border-border"
+                          >
+                            <span className="text-foreground font-medium">{r.road_name}</span>
+                            <RoadBadge status={r.status} />
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Recommended Action (grounded in existing alert template logic) */}
+              {recommendedAction && (
+                <div className="mt-3 pt-2 border-t border-border/50">
+                  <div className="text-[0.65rem] font-bold uppercase tracking-wider text-muted-foreground font-mono">
+                    Recommended Action
+                  </div>
+                  <p className="text-xs text-foreground/90 mt-0.5 leading-snug">
+                    {recommendedAction}
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        ) : null}
       </section>
 
       <section className="mt-4 grid gap-4 lg:grid-cols-[1.4fr_1fr]">

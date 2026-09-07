@@ -3,13 +3,19 @@ import { queryOptions, useSuspenseQuery, useQueryClient } from "@tanstack/react-
 import { useMemo, useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { getOverview, dispatchAlertServerFn, retractAlertServerFn } from "@/lib/monitoring.functions";
+import {
+  getLocalizedZoneName,
+  getLocalizedZoneLocation,
+  getLocalizedExplanation,
+} from "@/lib/geo-translations";
 import { RiskBadge } from "@/components/RiskBits";
 import { PanelSkeleton, RouteError } from "@/components/ConsoleShell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { supabase } from "@/integrations/supabase/client";
 import { LocalsAlertsPanel } from "@/components/LocalsAlertsPanel";
-import { getUserAuthorizationState } from "@/lib/auth-domains";
+import { getUserAuthorizationState, type AppUserRole } from "@/lib/auth-domains";
+import { ShieldAlert, Lock } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -27,9 +33,20 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
+import { getOfflineOverviewFallback } from "@/lib/offline-manager";
+
 const overviewQuery = queryOptions({
   queryKey: ["overview"],
-  queryFn: () => getOverview(),
+  networkMode: "always",
+  queryFn: async () => {
+    try {
+      return await getOverview();
+    } catch (err) {
+      console.warn("[Alerts] Server query failed, using offline fallback:", err);
+      return getOfflineOverviewFallback();
+    }
+  },
+  staleTime: 60 * 1000,
 });
 
 const TEMPLATES: Record<
@@ -84,7 +101,14 @@ const TEMPLATES: Record<
 };
 
 export const Route = createFileRoute("/alerts")({
-  loader: ({ context }) => context.queryClient.ensureQueryData(overviewQuery),
+  loader: async ({ context }) => {
+    try {
+      return await context.queryClient.ensureQueryData(overviewQuery);
+    } catch (err) {
+      console.warn("[Alerts Loader] Error fetching overview, falling back to offline data:", err);
+      return getOfflineOverviewFallback();
+    }
+  },
   head: () => ({
     meta: [
       { title: "Alert Dispatch History — NER Landslide Console" },
@@ -107,13 +131,21 @@ export const Route = createFileRoute("/alerts")({
 });
 
 function AlertsPage() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const { data } = useSuspenseQuery(overviewQuery);
   const qc = useQueryClient();
   const [lang, setLang] = useState("en");
   const [level, setLevel] = useState("All");
   const [selectedZoneFilter, setSelectedZoneFilter] = useState<string>("All");
+
+  // Keep alert template language in sync with global header language switcher
+  useEffect(() => {
+    const current = (i18n.resolvedLanguage || i18n.language || "en").split("-")[0];
+    if (current && TEMPLATES[current]) {
+      setLang(current);
+    }
+  }, [i18n.language, i18n.resolvedLanguage]);
 
   // Seamlessly transition if the user navigates directly to /alerts#risk-map or similar hash anchors
   useEffect(() => {
@@ -157,11 +189,34 @@ function AlertsPage() {
   // Alert dispatch modal state
   const [openDispatch, setOpenDispatch] = useState(false);
   const [targetZoneId, setTargetZoneId] = useState<number>(data.zones[0]?.id ?? 1);
-  const [targetLang, setTargetLang] = useState<"en" | "as" | "bn" | "ne">("en");
+  const [targetLang, setTargetLang] = useState<string>("en");
   const [targetChannel, setTargetChannel] = useState<"sms" | "push" | "both">("both");
   const [justification, setJustification] = useState("");
   const [dispatching, setDispatching] = useState(false);
   const [dispatchResult, setDispatchResult] = useState<string | null>(null);
+
+  // Security official authorization state
+  const [viewerRole, setViewerRole] = useState<AppUserRole>("PUBLIC_USER");
+  const [dispatchAuthorized, setDispatchAuthorized] = useState<boolean>(false);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      const authState = getUserAuthorizationState(session?.user ?? null);
+      setViewerRole(authState.role);
+      setDispatchAuthorized(Boolean(session?.user?.user_metadata?.["dispatch_authorized"]));
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      const authState = getUserAuthorizationState(session?.user ?? null);
+      setViewerRole(authState.role);
+      setDispatchAuthorized(Boolean(session?.user?.user_metadata?.["dispatch_authorized"]));
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const isSecurityOfficial =
+    viewerRole === "DISPATCHER" ||
+    viewerRole === "ADMIN" ||
+    (viewerRole === "VERIFIED_OFFICIAL" && dispatchAuthorized);
 
   const alerts = useMemo(() => {
     return data.alerts.filter((a: any) => {
@@ -173,6 +228,10 @@ function AlertsPage() {
 
   async function handleManualDispatch(e: React.FormEvent) {
     e.preventDefault();
+    if (!isSecurityOfficial) {
+      setDispatchResult("Forbidden: Security alerts can only be generated by authorized security officials.");
+      return;
+    }
     setDispatching(true);
     setDispatchResult(null);
     try {
@@ -255,10 +314,11 @@ function AlertsPage() {
         <Dialog open={openDispatch} onOpenChange={setOpenDispatch}>
           <DialogTrigger asChild>
             <Button
-              variant="default"
+              variant={isSecurityOfficial ? "default" : "outline"}
               size="sm"
-              className="font-mono text-xs uppercase tracking-wider"
+              className="font-mono text-xs uppercase tracking-wider gap-1.5"
             >
+              {!isSecurityOfficial && <Lock className="h-3.5 w-3.5 text-muted-foreground" />}
               {t("alerts.dispatch_emergency_alert")}
             </Button>
           </DialogTrigger>
@@ -272,123 +332,159 @@ function AlertsPage() {
               </DialogDescription>
             </DialogHeader>
 
-            <div className="rounded border border-primary/20 bg-primary/5 p-2.5 text-[0.7rem] font-mono text-muted-foreground">
-              <span className="font-semibold text-primary uppercase tracking-wide">{t("alerts.authority_notice_label")} </span>
-              {t("alerts.authority_notice")}
-            </div>
+            {!isSecurityOfficial ? (
+              <div className="space-y-4 py-2">
+                <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-center space-y-3">
+                  <ShieldAlert className="h-9 w-9 text-amber-500 mx-auto" />
+                  <div className="font-semibold text-foreground text-sm uppercase font-display tracking-wider">
+                    Security Clearance Required
+                  </div>
+                  <p className="text-xs text-muted-foreground font-mono leading-relaxed">
+                    Emergency and security alerts can only be generated by authorized security officials (State Disaster Management Authorities, District Magistrates, and certified dispatchers).
+                  </p>
+                  <div className="text-[0.7rem] font-mono text-muted-foreground border-t border-amber-500/20 pt-2">
+                    Current account clearance: <span className="font-semibold text-foreground uppercase">{viewerRole}</span> (Restricted)
+                  </div>
+                </div>
 
-            {dispatchResult && (
-              <div
-                role="status"
-                aria-live="polite"
-                className="rounded border border-primary/40 bg-primary/10 p-3 text-xs font-mono text-primary"
-              >
-                {dispatchResult}
+                <DialogFooter className="mt-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setOpenDispatch(false)}
+                    className="w-full font-mono text-xs"
+                  >
+                    {t("alerts.cancel")}
+                  </Button>
+                </DialogFooter>
               </div>
+            ) : (
+              <>
+                <div className="rounded border border-primary/20 bg-primary/5 p-2.5 text-[0.7rem] font-mono text-muted-foreground">
+                  <span className="font-semibold text-primary uppercase tracking-wide">{t("alerts.authority_notice_label")} </span>
+                  {t("alerts.authority_notice")}
+                </div>
+
+                {dispatchResult && (
+                  <div
+                    role="status"
+                    aria-live="polite"
+                    className="rounded border border-primary/40 bg-primary/10 p-3 text-xs font-mono text-primary"
+                  >
+                    {dispatchResult}
+                  </div>
+                )}
+
+                <form onSubmit={handleManualDispatch} className="space-y-4 pt-1">
+                  <div className="grid gap-2">
+                    <label htmlFor="target-zone-select" className="text-xs font-mono uppercase text-muted-foreground">
+                      {t("alerts.target_zone")}
+                    </label>
+                    <Select
+                      value={String(targetZoneId)}
+                      onValueChange={(v) => setTargetZoneId(Number(v))}
+                    >
+                      <SelectTrigger id="target-zone-select" aria-label={t("alerts.target_zone")} className="bg-secondary/40 border-border font-mono text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent className="bg-surface border-border max-h-56">
+                        {data.zones.map((z: any) => (
+                          <SelectItem key={z.id} value={String(z.id)} className="text-xs font-mono">
+                            {String(t("zones.label", { defaultValue: `Zone ${z.id}`, id: z.id }))}: {getLocalizedZoneName(z.id, z.zone_name, t)} ({String(t(`risk_levels.${z.current_risk_level}`, { defaultValue: z.current_risk_level }))})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="grid gap-2">
+                      <label htmlFor="target-lang-select" className="text-xs font-mono uppercase text-muted-foreground">
+                        {t("alerts.select_language")}
+                      </label>
+                      <Select
+                        value={targetLang}
+                        onValueChange={(v) => setTargetLang(v)}
+                      >
+                        <SelectTrigger id="target-lang-select" aria-label={t("alerts.select_language")} className="bg-secondary/40 border-border font-mono text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent className="bg-surface border-border">
+                          <SelectItem value="en">English</SelectItem>
+                          <SelectItem value="hi">हिन्दी</SelectItem>
+                          <SelectItem value="bn">বাংলা</SelectItem>
+                          <SelectItem value="as">অসমীয়া</SelectItem>
+                          <SelectItem value="ne">नेपाली</SelectItem>
+                          <SelectItem value="mni">মণিপুরী</SelectItem>
+                          <SelectItem value="lus">Mizo</SelectItem>
+                          <SelectItem value="kha">Khasi</SelectItem>
+                          <SelectItem value="grt">Garo</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="grid gap-2">
+                      <label htmlFor="target-channel-select" className="text-xs font-mono uppercase text-muted-foreground">
+                        {t("alerts.select_channel")}
+                      </label>
+                      <Select
+                        value={targetChannel}
+                        onValueChange={(v) => setTargetChannel(v as "sms" | "push" | "both")}
+                      >
+                        <SelectTrigger id="target-channel-select" aria-label={t("alerts.select_channel")} className="bg-secondary/40 border-border font-mono text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent className="bg-surface border-border">
+                          <SelectItem value="both">{t("alerts.channel_both")}</SelectItem>
+                          <SelectItem value="sms">{t("alerts.channel_sms")}</SelectItem>
+                          <SelectItem value="push">{t("alerts.channel_push")}</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-2">
+                    <label htmlFor="dispatch-justification" className="text-xs font-mono uppercase text-muted-foreground">
+                      {t("alerts.justification_required")}
+                    </label>
+                    <Input
+                      id="dispatch-justification"
+                      type="text"
+                      placeholder="e.g. Field reports and radar confirm slope instability along NH-29"
+                      value={justification}
+                      onChange={(e) => setJustification(e.target.value)}
+                      minLength={8}
+                      required
+                      aria-required="true"
+                      className="bg-secondary/40 border-border font-mono text-xs"
+                    />
+                  </div>
+
+                  <DialogFooter className="mt-4">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setOpenDispatch(false)}
+                      disabled={dispatching}
+                      className="font-mono text-xs"
+                    >
+                      {t("alerts.cancel")}
+                    </Button>
+                    <Button
+                      type="submit"
+                      size="sm"
+                      variant="destructive"
+                      disabled={dispatching || justification.trim().length < 8}
+                      className="font-mono text-xs uppercase"
+                    >
+                      {dispatching ? t("alerts.authorizing") : t("alerts.authorize_dispatch")}
+                    </Button>
+                  </DialogFooter>
+                </form>
+              </>
             )}
-
-            <form onSubmit={handleManualDispatch} className="space-y-4 pt-1">
-              <div className="grid gap-2">
-                <label htmlFor="target-zone-select" className="text-xs font-mono uppercase text-muted-foreground">
-                  {t("alerts.target_zone")}
-                </label>
-                <Select
-                  value={String(targetZoneId)}
-                  onValueChange={(v) => setTargetZoneId(Number(v))}
-                >
-                  <SelectTrigger id="target-zone-select" aria-label={t("alerts.target_zone")} className="bg-secondary/40 border-border font-mono text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent className="bg-surface border-border max-h-56">
-                    {data.zones.map((z: any) => (
-                      <SelectItem key={z.id} value={String(z.id)} className="text-xs font-mono">
-                        Zone {z.id}: {z.zone_name} ({z.current_risk_level})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="grid gap-2">
-                  <label htmlFor="target-lang-select" className="text-xs font-mono uppercase text-muted-foreground">
-                    {t("alerts.select_language")}
-                  </label>
-                  <Select
-                    value={targetLang}
-                    onValueChange={(v) => setTargetLang(v as "en" | "as" | "bn" | "ne")}
-                  >
-                    <SelectTrigger id="target-lang-select" aria-label={t("alerts.select_language")} className="bg-secondary/40 border-border font-mono text-xs">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent className="bg-surface border-border">
-                      <SelectItem value="en">English</SelectItem>
-                      <SelectItem value="as">অসমীয়া</SelectItem>
-                      <SelectItem value="bn">বাংলা</SelectItem>
-                      <SelectItem value="ne">नेपाली</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="grid gap-2">
-                  <label htmlFor="target-channel-select" className="text-xs font-mono uppercase text-muted-foreground">
-                    {t("alerts.select_channel")}
-                  </label>
-                  <Select
-                    value={targetChannel}
-                    onValueChange={(v) => setTargetChannel(v as "sms" | "push" | "both")}
-                  >
-                    <SelectTrigger id="target-channel-select" aria-label={t("alerts.select_channel")} className="bg-secondary/40 border-border font-mono text-xs">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent className="bg-surface border-border">
-                      <SelectItem value="both">{t("alerts.channel_both")}</SelectItem>
-                      <SelectItem value="sms">{t("alerts.channel_sms")}</SelectItem>
-                      <SelectItem value="push">{t("alerts.channel_push")}</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              <div className="grid gap-2">
-                <label htmlFor="dispatch-justification" className="text-xs font-mono uppercase text-muted-foreground">
-                  {t("alerts.justification_required")}
-                </label>
-                <Input
-                  id="dispatch-justification"
-                  type="text"
-                  placeholder="e.g. Field reports and radar confirm slope instability along NH-29"
-                  value={justification}
-                  onChange={(e) => setJustification(e.target.value)}
-                  minLength={8}
-                  required
-                  aria-required="true"
-                  className="bg-secondary/40 border-border font-mono text-xs"
-                />
-              </div>
-
-              <DialogFooter className="mt-4">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setOpenDispatch(false)}
-                  disabled={dispatching}
-                  className="font-mono text-xs"
-                >
-                  {t("alerts.cancel")}
-                </Button>
-                <Button
-                  type="submit"
-                  size="sm"
-                  variant="destructive"
-                  disabled={dispatching || justification.trim().length < 8}
-                  className="font-mono text-xs uppercase"
-                >
-                  {dispatching ? t("alerts.authorizing") : t("alerts.authorize_dispatch")}
-                </Button>
-              </DialogFooter>
-            </form>
           </DialogContent>
         </Dialog>
       </div>
@@ -428,7 +524,7 @@ function AlertsPage() {
               </SelectItem>
               {data.zones.map((z: any) => (
                 <SelectItem key={z.id} value={String(z.id)} className="text-xs font-mono">
-                  {z.zone_name}
+                  {getLocalizedZoneName(z.id, z.zone_name, t)}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -455,7 +551,9 @@ function AlertsPage() {
       <div className="mt-6 space-y-4">
         {alerts.map((a: any) => {
           const zone = data.zones.find((z: any) => z.id === a.zone_id);
-          const zoneName = zone ? `${zone.zone_name} (${zone.district}, ${zone.state})` : `Zone ${a.zone_id}`;
+          const zoneName = zone
+            ? getLocalizedZoneLocation(zone, t)
+            : t("zones.generic", "Zone {{id}}", { id: a.zone_id });
           const isDelivered = (a as { delivery_status?: string }).delivery_status === "delivered";
 
           const isRetracted = Boolean((a as any).is_retracted || (a as any).status === "retracted");
@@ -535,7 +633,7 @@ function AlertsPage() {
                 <div className="rounded border border-border bg-surface-raised p-3">
                   <div className="label-caps">{t("alerts.hydrological_reasoning")}</div>
                   <p className="mt-2 text-xs leading-relaxed text-foreground/90">
-                    {a.explanation}
+                    {getLocalizedExplanation(a.explanation, t, lang)}
                   </p>
                 </div>
               </div>

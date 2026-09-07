@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import {
   useOfflineQueue,
+  useOnlineStatus,
   getCachedOfflinePackage,
   downloadAndCacheOfflinePackage,
   type CachedBundleStatus,
@@ -8,10 +9,12 @@ import {
 import { Button } from "@/components/ui/button";
 import { useTranslation } from "react-i18next";
 import { SyncQueueDialog } from "./SyncQueueDialog";
+import { FieldObservationDialog } from "./FieldObservationDialog";
 
 export function OfflineBanner() {
   const { t } = useTranslation();
-  const { isOnline, queueCount, syncing, triggerSync } = useOfflineQueue();
+  const { queueCount, syncedCount, syncing, syncStatus, syncError, triggerSync } = useOfflineQueue();
+  const isOnline = useOnlineStatus();
   const [cachedStatus, setCachedStatus] = useState<CachedBundleStatus | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [bannerNotice, setBannerNotice] = useState<string | null>(null);
@@ -40,6 +43,25 @@ export function OfflineBanner() {
     }
   }
 
+  const getStatusBadgeStyle = () => {
+    switch (syncStatus) {
+      case "ONLINE":
+        return "bg-emerald-500/10 text-emerald-400 border-emerald-500/30";
+      case "OFFLINE":
+        return "bg-zinc-800 text-zinc-300 border-zinc-700";
+      case "SYNCING":
+        return "bg-blue-500/20 text-blue-400 border-blue-500/40 animate-pulse";
+      case "PENDING SYNC":
+        return "bg-amber-500/20 text-amber-400 border-amber-500/40";
+      case "SYNCED":
+        return "bg-emerald-500/20 text-emerald-300 border-emerald-500/40";
+      case "SYNC FAILED":
+        return "bg-red-500/20 text-red-400 border-red-500/40";
+      default:
+        return "bg-zinc-800 text-zinc-300 border-zinc-700";
+    }
+  };
+
   return (
     <aside
       aria-label={t("offline.aria_label", "Offline status and synchronization")}
@@ -48,9 +70,17 @@ export function OfflineBanner() {
     >
       <div className="mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
+          {/* Explicit Status Badge required by specification */}
           <span
-            className={`h-2.5 w-2.5 rounded-full ${
-              !isOnline ? "bg-amber-400 animate-pulse" : "bg-blue-400"
+            data-testid="connection-status-badge"
+            className={`inline-flex items-center px-2 py-0.5 rounded border text-[0.65rem] font-bold tracking-wider font-mono ${getStatusBadgeStyle()}`}
+          >
+            {syncStatus}
+          </span>
+
+          <span
+            className={`h-2 w-2 rounded-full ${
+              !isOnline ? "bg-amber-400 animate-pulse" : "bg-emerald-400"
             }`}
           />
           <span className={`font-semibold uppercase tracking-wider ${!isOnline ? "text-amber-400" : ""}`}>
@@ -64,18 +94,40 @@ export function OfflineBanner() {
                     age: cachedStatus.ageHours,
                   })
                 : t("offline.last_updated_unknown", "Last updated at unknown timestamp, may be outdated — live network recompute needed.")
-              : bannerNotice || t("offline.pending_queue", "{{count}} pending observation(s) in local queue.", { count: queueCount })}
+              : bannerNotice ||
+                (queueCount > 0
+                  ? t("offline.pending_queue", "{{count}} pending observation(s) in local queue.", { count: queueCount })
+                  : syncedCount > 0
+                  ? t("offline.synced_queue_notice", "{{count}} observation(s) synchronized with server.", { count: syncedCount })
+                  : t("offline.pending_queue_zero", "0 pending observations."))}
           </span>
         </div>
 
         <div className="flex items-center gap-2">
+          <FieldObservationDialog
+            trigger={
+              <Button
+                size="sm"
+                className="h-7 px-2.5 text-[0.68rem] font-mono uppercase bg-primary text-primary-foreground hover:bg-primary/90 font-semibold cursor-pointer"
+              >
+                + {t("field_observation.button_label", "Report Observation")}
+              </Button>
+            }
+          />
+
           <Button
             size="sm"
             variant="outline"
             onClick={() => setQueueDialogOpen(true)}
             className="h-7 px-2.5 text-[0.68rem] font-mono uppercase border-primary/50 text-primary hover:bg-primary/10 cursor-pointer"
           >
-            {syncing ? t("offline.syncing", "Syncing…") : t("offline.sync_queue_count", "Sync Queue ({{count}})", { count: queueCount })}
+            {syncing
+              ? t("offline.syncing", "Syncing…")
+              : queueCount > 0
+              ? t("offline.sync_queue_count", "Sync Queue ({{count}})", { count: queueCount })
+              : syncedCount > 0
+              ? t("offline.sync_queue_synced", "Sync Queue ({{count}} Synced)", { count: syncedCount })
+              : t("offline.sync_queue_empty", "Sync Queue (0)")}
           </Button>
 
           {isOnline && (

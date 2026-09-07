@@ -49,12 +49,47 @@ export const ALERT_TEMPLATES: Record<
         advisory ? ` [${advisory}]` : ""
       }`,
   },
+  hi: {
+    label: "हिन्दी (Hindi)",
+    render: (zone, level, advisory) =>
+      `${zone} में भूस्खलन का ${level === "Severe" ? "अति गंभीर" : "उच्च"} जोखिम। ढलान वाले मार्गों पर जाने से बचें। दरारें दिखने पर जिला नियंत्रण कक्ष को तुरंत सूचित करें।${
+        advisory ? ` [${advisory}]` : ""
+      }`,
+  },
+  mni: {
+    label: "মৈতৈলোন্ (Manipuri)",
+    render: (zone, level, advisory) =>
+      `${zone} দা চীংহায়বগী ${level === "Severe" ? "য়াম্না ৱাংবা" : "অকনবা"} খুদোংথীবা লৈরে। চীংগী লম্বী চৎপদা চেকশিনবীয়ু। মফম চৎহায়বা উবদা ডিষ্ট্রিক্ট কন্ত্রোল রুমদা পাউ পীবীয়ু।${
+        advisory ? ` [${advisory}]` : ""
+      }`,
+  },
+  lus: {
+    label: "Mizo ṭawng (Mizo)",
+    render: (zone, level, advisory) =>
+      `${zone}-ah lei min hlauhawmna a ${level === "Severe" ? "sang tawpkhawk" : "sang"}. Chhengchhe kawngah fimkhur rawh. Lei khi i hmuh chuan district control room hriattir vat rawh.${
+        advisory ? ` [${advisory}]` : ""
+      }`,
+  },
+  kha: {
+    label: "Ka Ktien Khasi (Khasi)",
+    render: (zone, level, advisory) =>
+      `Ka jingtwap khyndew ha ${zone} ka long kaba ${level === "Severe" ? "jur bha" : "ma"}. Kyntait ban iaid lynti lum. Lada lap ba pait khyndew pyntip kloi sha district control room.${
+        advisory ? ` [${advisory}]` : ""
+      }`,
+  },
+  grt: {
+    label: "A·chik (Garo)",
+    render: (zone, level, advisory) =>
+      `${zone}-o a·a bel·ani ${level === "Severe" ? "kenbegnibegipa" : "kengipa"} obosta donga. A·bri ramarango re·rurana simsakbo. A·a bretako nikode district control room-ona paratbo.${
+        advisory ? ` [${advisory}]` : ""
+      }`,
+  },
 };
 
 export interface AlertDispatchOptions {
   actor?: string | undefined;
   channel?: ("sms" | "push" | "both") | undefined;
-  language?: ("en" | "as" | "bn" | "ne") | undefined;
+  language?: string | undefined;
   idempotencyKey?: string | undefined;
   cooldownHours?: number | undefined;
   justification?: string | undefined;

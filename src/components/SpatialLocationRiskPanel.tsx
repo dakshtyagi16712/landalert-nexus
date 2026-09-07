@@ -1,6 +1,11 @@
 import { useTranslation } from "react-i18next";
 import { riskColor } from "@/lib/risk";
 import type { LocationSpatialRisk, CellRiskEvaluation } from "@/lib/spatial-risk.service";
+import {
+  getLocalizedCityName,
+  getLocalizedDistrict,
+  getLocalizedState,
+} from "@/lib/geo-translations";
 import { ChevronUp, ShieldAlert, Satellite, CloudRain, Mountain, Info, Compass, Layers, Activity } from "lucide-react";
 
 interface Props {
@@ -21,11 +26,11 @@ export default function SpatialLocationRiskPanel({
   // Normalize displayed values whether from city aggregation or direct cell click
   const isCell = !locationRisk && Boolean(cellRisk);
   const title = isCell
-    ? `${cellRisk!.district} (${cellRisk!.cell_id})`
-    : locationRisk!.location.name;
+    ? `${getLocalizedDistrict(cellRisk!.district, t)} (${cellRisk!.cell_id})`
+    : getLocalizedCityName(locationRisk!.location.name, t);
   const subtitle = isCell
-    ? `${cellRisk!.state} · 0.25° Spatial Prediction Cell · Centroid: ${cellRisk!.centroid[0].toFixed(2)}°N, ${cellRisk!.centroid[1].toFixed(2)}°E`
-    : `${locationRisk!.location.district} district · ${locationRisk!.location.state} · Location Risk Aggregate`;
+    ? `${getLocalizedState(cellRisk!.state, t)} · 0.25° ${t("spatial_risk.cell_desc", "Spatial Prediction Cell")} · Centroid: ${cellRisk!.centroid[0].toFixed(2)}°N, ${cellRisk!.centroid[1].toFixed(2)}°E`
+    : `${getLocalizedDistrict(locationRisk!.location.district, t)} ${t("dashboard.district_label", "district")} · ${getLocalizedState(locationRisk!.location.state, t)} · ${t("spatial_risk.location_aggregate", "Location Risk Aggregate")}`;
 
   const level = isCell ? cellRisk!.risk_level : locationRisk!.risk.level;
   const score = isCell ? cellRisk!.final_risk_score : locationRisk!.risk.score;

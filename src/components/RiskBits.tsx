@@ -1,6 +1,7 @@
 import { riskBadgeClass, roadStatusClass } from "@/lib/risk";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
+import { getLocalizedExplanation } from "@/lib/geo-translations";
 
 export function RiskBadge({
   level,
@@ -163,13 +164,14 @@ export function ExplanationCard({
   explanation: string | null;
   title?: string;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   if (!explanation) return null;
+  const localized = getLocalizedExplanation(explanation, t, i18n.language);
   return (
     <div className="rounded border border-border bg-surface-raised p-4">
       <div className="label-caps">{title || t("risk_bits.why_this_fired", "Why this fired")}</div>
       <p className="mt-2 text-xs leading-relaxed text-foreground/90">
-        {explanation}
+        {localized}
       </p>
     </div>
   );

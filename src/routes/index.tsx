@@ -31,6 +31,12 @@ import {
   ForecastRiskBadge,
   PrioritizationScoreBadge,
 } from "@/components/RiskBits";
+import {
+  getLocalizedZoneName,
+  getLocalizedDistrict,
+  getLocalizedState,
+  getLocalizedAlertMessage,
+} from "@/lib/geo-translations";
 import { PanelSkeleton, RouteError } from "@/components/ConsoleShell";
 import { FieldObservationDialog } from "@/components/FieldObservationDialog";
 import { RoadNetworkDialog } from "@/components/RoadNetworkDialog";
@@ -58,14 +64,31 @@ import type { User } from "@supabase/supabase-js";
 import { useUserLocation } from "@/hooks/useUserLocation";
 import { getUserAuthorizationState, type AppUserRole } from "@/lib/auth-domains";
 import { getObservationStatusMeta } from "@/lib/observation-status";
+import { getOfflineOverviewFallback, getQueuedObservations, getSyncedObservations } from "@/lib/offline-manager";
 
 const overviewQuery = queryOptions({
   queryKey: ["overview"],
-  queryFn: () => getOverview(),
+  networkMode: "always",
+  queryFn: async () => {
+    try {
+      return await getOverview();
+    } catch (err) {
+      console.warn("[Overview] Server query failed, using offline fallback:", err);
+      return getOfflineOverviewFallback();
+    }
+  },
+  staleTime: 60 * 1000,
 });
 
 export const Route = createFileRoute("/")({
-  loader: ({ context }) => context.queryClient.ensureQueryData(overviewQuery),
+  loader: async ({ context }) => {
+    try {
+      return await context.queryClient.ensureQueryData(overviewQuery);
+    } catch (err) {
+      console.warn("[Route Loader] Error fetching overview, falling back to offline data:", err);
+      return getOfflineOverviewFallback();
+    }
+  },
   head: () => ({
     meta: [
       { title: "LandAlert-Nexus — Landslide Early Warning System" },
@@ -98,7 +121,7 @@ import {
 } from "@/lib/geography";
 
 function Dashboard() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { data } = useSuspenseQuery(overviewQuery);
   const dataZonesRef = useRef(data.zones);
   dataZonesRef.current = data.zones;
@@ -419,10 +442,57 @@ function Dashboard() {
     return s.length > 0 ? s.join(" and ") : "Mizoram and Manipur";
   }, [highOrSevereZones]);
 
-  // Observations list (from database or default fallback)
+  const [queueUpdateSignal, setQueueUpdateSignal] = useState(0);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handleQueueChange = () => setQueueUpdateSignal((prev) => prev + 1);
+    window.addEventListener("landalert-queue-updated", handleQueueChange);
+    window.addEventListener("storage", handleQueueChange);
+    return () => {
+      window.removeEventListener("landalert-queue-updated", handleQueueChange);
+      window.removeEventListener("storage", handleQueueChange);
+    };
+  }, []);
+
+  // Observations list (combining offline pending queue, local synced archive, and server observations)
   const observationsList = useMemo(() => {
-    return ((data as any).observations || []).slice(0, 5);
-  }, [data]);
+    const serverObs = (data as any).observations || [];
+    const serverKeySet = new Set(
+      serverObs.map((s: any) => s.idempotency_key || String(s.id)),
+    );
+
+    const queuedObs = getQueuedObservations().map((q) => ({
+      id: q.idempotency_key,
+      zone_id: q.zone_id,
+      observed_at: q.observed_at || q.client_timestamp || new Date().toISOString(),
+      rainfall_mm: q.rainfall_mm,
+      soil_condition: q.soil_condition,
+      visual_signs: q.visual_signs,
+      road_status: q.road_status,
+      status: "PENDING_SYNC",
+      review_status: "PENDING_SYNC",
+      is_offline_queued: true,
+    }));
+
+    const syncedObs = getSyncedObservations()
+      .filter((s) => !serverKeySet.has(s.idempotency_key!))
+      .map((s) => ({
+        id: s.idempotency_key,
+        zone_id: s.zone_id,
+        observed_at: s.observed_at || s.client_timestamp || new Date().toISOString(),
+        rainfall_mm: s.rainfall_mm,
+        soil_condition: s.soil_condition,
+        visual_signs: s.visual_signs,
+        road_status: s.road_status,
+        status: "SYNCED",
+        review_status: s.review_status || "OFFICIAL_VERIFIED",
+        is_offline_queued: false,
+        is_synced: true,
+      }));
+
+    return [...queuedObs, ...syncedObs, ...serverObs].slice(0, 8);
+  }, [data, queueUpdateSignal]);
 
   async function runRecompute() {
     setBusy(true);
@@ -763,7 +833,7 @@ function Dashboard() {
                       .filter((s: string) => s !== "All")
                       .map((s: string) => (
                         <option key={s} value={s}>
-                          {s}
+                          {getLocalizedState(s, t)}
                         </option>
                       ))}
                   </select>
@@ -799,10 +869,10 @@ function Dashboard() {
                       }}
                       className="h-8 rounded border border-border bg-background px-2 text-xs text-foreground font-sans focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary cursor-pointer"
                     >
-                      <option value="All">{t("map_panel.all_districts", `All Districts in ${stateFilter}`)}</option>
+                      <option value="All">{t("map_panel.all_districts", `All Districts in ${getLocalizedState(stateFilter, t)}`)}</option>
                       {availableDistricts.map((d) => (
                         <option key={d.id} value={d.name}>
-                          {d.name} {d.zoneIds.length > 0 ? `(${d.zoneIds.length} station)` : ""}
+                          {getLocalizedDistrict(d.name, t)} {d.zoneIds.length > 0 ? `(${d.zoneIds.length} station)` : ""}
                         </option>
                       ))}
                     </select>
@@ -947,12 +1017,12 @@ function Dashboard() {
                   <div>
                     <span className="label-caps">{t("dashboard.zone_overview", "Selected Zone Operational Brief")}</span>
                     <h3 className="text-xl font-bold text-foreground font-display mt-0.5">
-                      {selected.zone_name}
+                      {getLocalizedZoneName(selected.id, selected.zone_name, t)}
                     </h3>
                     <p className="text-xs text-muted-foreground">
-                      {selected.district} district · {selected.state} ·{" "}
-                      {selected.population.toLocaleString("en-IN")} residents ·{" "}
-                      {selected.mean_slope_deg}° mean slope
+                      {getLocalizedDistrict(selected.district, t)} {t("dashboard.district_label", "district")} · {getLocalizedState(selected.state, t)} ·{" "}
+                      {selected.population.toLocaleString(i18n.language || "en-IN")} {t("dashboard.residents", "residents")} ·{" "}
+                      {selected.mean_slope_deg}° {t("dashboard.mean_slope", "mean slope")}
                     </p>
                     <div className="mt-2 flex items-center gap-2">
                       <FreshnessBadge
@@ -1079,7 +1149,7 @@ function Dashboard() {
                             type="button"
                             className="w-full rounded border border-border bg-surface px-3 py-2 text-xs font-medium text-foreground hover:bg-secondary transition-colors cursor-pointer"
                           >
-                            + {t("dashboard.report_observation_for_zone", "Report Observation for {{zone}}", { zone: selected.zone_name })}
+                            + {t("dashboard.report_observation_for_zone", "Report Observation for {{zone}}", { zone: getLocalizedZoneName(selected.id, selected.zone_name, t) })}
                           </button>
                         }
                         onSuccess={() => qc.invalidateQueries()}
@@ -1257,10 +1327,10 @@ function Dashboard() {
                         </td>
                         <td className="py-2.5 px-2.5">
                           <span className="font-semibold text-foreground block font-display">
-                            {item.zoneName}
+                            {getLocalizedZoneName(item.zoneId, item.zoneName, t)}
                           </span>
                           <span className="text-[0.65rem] text-muted-foreground">
-                            {item.district}, {item.state}
+                            {getLocalizedDistrict(item.district, t)}, {getLocalizedState(item.state, t)}
                           </span>
                         </td>
                         <td className="py-2.5 px-2.5 whitespace-nowrap">
@@ -1411,7 +1481,7 @@ function Dashboard() {
                     {observationsList.map((obs: any) => {
                       const cleanObs = sanitizeObservationRecord(obs);
                       const z = data.zones.find((x: ZoneRow) => x.id === cleanObs.zone_id);
-                      const loc = z ? `${z.zone_name}, ${z.state}` : `Zone ${cleanObs.zone_id}`;
+                      const loc = z ? `${getLocalizedZoneName(z.id, z.zone_name, t)}, ${getLocalizedState(z.state, t)}` : t("zones.generic", "Zone {{id}}", { id: cleanObs.zone_id });
                       const typeLabel =
                         cleanObs.visual_signs ||
                         (cleanObs.road_status && cleanObs.road_status !== "open" ? `Road ${cleanObs.road_status}` : "Slope Movement");
@@ -1572,12 +1642,15 @@ function Dashboard() {
                 <tbody className="divide-y divide-border/60">
                   {data.alerts.slice(0, 6).map((a: any) => {
                     const z = data.zones.find((x: ZoneRow) => x.id === a.zone_id);
-                    const location = z ? `${z.zone_name}, ${z.state}` : `Zone ${a.zone_id}`;
+                    const location = z ? `${getLocalizedZoneName(z.id, z.zone_name, t)}, ${getLocalizedState(z.state, t)}` : t("zones.generic", "Zone {{id}}", { id: a.zone_id });
+                    const displayMessage = z
+                      ? getLocalizedAlertMessage(getLocalizedZoneName(z.id, z.zone_name, t), a.risk_level, t)
+                      : a.message;
                     return (
                       <tr key={a.id} className="hover:bg-secondary/20 transition-colors">
                         <td className="py-2.5 px-3 font-mono text-[0.7rem] whitespace-nowrap text-muted-foreground">
-                          {new Date(a.dispatched_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}{" "}
-                          {new Date(a.dispatched_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: false })}
+                          {new Date(a.dispatched_at).toLocaleDateString(i18n.language || "en-IN", { day: "2-digit", month: "short" })}{" "}
+                          {new Date(a.dispatched_at).toLocaleTimeString(i18n.language || "en-IN", { hour: "2-digit", minute: "2-digit", hour12: false })}
                         </td>
                         <td className="py-2.5 px-3 whitespace-nowrap">
                           <RiskBadge
@@ -1589,7 +1662,7 @@ function Dashboard() {
                           {location}
                         </td>
                         <td className="py-2.5 px-3 text-muted-foreground text-[0.72rem] line-clamp-2 max-w-xs">
-                          {a.message}
+                          {displayMessage}
                         </td>
                       </tr>
                     );

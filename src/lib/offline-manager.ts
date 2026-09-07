@@ -16,6 +16,7 @@ import { submitFieldObservationsServerFn, getOfflinePackageServerFn } from "./mo
 
 const OFFLINE_QUEUE_KEY = "landalert_field_observations_queue_v1";
 const OFFLINE_PACKAGE_KEY = "landalert_offline_bundle_v1";
+export const OFFLINE_SYNCED_KEY = "landalert_synced_observations_v1";
 
 export interface CachedBundleStatus {
   package: OfflinePackage | null;
@@ -174,6 +175,7 @@ export function queueObservation(
     ...observation,
     idempotency_key: idKey,
     client_timestamp: observation.client_timestamp || new Date().toISOString(),
+    queue_status: observation.queue_status || "PENDING_SYNC",
   };
 
   const updatedQueue = [...currentQueue, fullRecord];
@@ -193,7 +195,24 @@ export function queueObservation(
 }
 
 /**
- * Removes successfully synchronized records from the queue using acknowledged keys.
+ * Retrieves the local synchronized observation history from storage.
+ */
+export function getSyncedObservations(): FieldObservationInput[] {
+  const storage = getStorage();
+  if (!storage) return [];
+  try {
+    const raw = storage.getItem(OFFLINE_SYNCED_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Removes successfully synchronized records from the queue using acknowledged keys
+ * and marks them as SYNCED in local history with synced_at timestamp.
  */
 export function pruneQueue(acknowledgedKeys: string[]): void {
   if (!acknowledgedKeys.length) return;
@@ -205,8 +224,22 @@ export function pruneQueue(acknowledgedKeys: string[]): void {
   const remaining = current.filter(
     (item) => !item.idempotency_key || !ackSet.has(item.idempotency_key),
   );
+  const now = new Date().toISOString();
+  const syncedRecords: FieldObservationInput[] = current
+    .filter((item) => item.idempotency_key && ackSet.has(item.idempotency_key))
+    .map((item) => ({
+      ...item,
+      queue_status: "SYNCED" as const,
+      synced_at: now,
+    }));
+
   try {
     storage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(remaining));
+    if (syncedRecords.length > 0) {
+      const priorSynced = getSyncedObservations();
+      const combined = [...syncedRecords, ...priorSynced].slice(0, 50);
+      storage.setItem(OFFLINE_SYNCED_KEY, JSON.stringify(combined));
+    }
     if (typeof window !== "undefined") {
       window.dispatchEvent(new CustomEvent("landalert-queue-updated"));
     }
@@ -223,6 +256,7 @@ export function clearOfflineQueue(): void {
   if (!storage) return;
   try {
     storage.removeItem(OFFLINE_QUEUE_KEY);
+    storage.removeItem(OFFLINE_SYNCED_KEY);
     if (typeof window !== "undefined") {
       window.dispatchEvent(new CustomEvent("landalert-queue-updated"));
     }
@@ -478,17 +512,31 @@ export async function downloadAndCacheOfflinePackage(): Promise<OfflinePackage> 
   return pkg as OfflinePackage;
 }
 
+export type OfflineSyncStatus =
+  | "ONLINE"
+  | "OFFLINE"
+  | "SYNCING"
+  | "PENDING SYNC"
+  | "SYNCED"
+  | "SYNC FAILED";
+
 /**
  * Hook to manage offline queue status and provide sync trigger.
  */
 export function useOfflineQueue() {
-  const isOnline = useOnlineStatus();
+  const { isOnline, apiReachable, checkHealth } = useConnectivityStatus();
   const [queueCount, setQueueCount] = useState<number>(0);
+  const [syncedCount, setSyncedCount] = useState<number>(0);
   const [syncing, setSyncing] = useState<boolean>(false);
   const [lastSyncResult, setLastSyncResult] = useState<SyncResult | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [justSynced, setJustSynced] = useState<boolean>(false);
+
+  const effectiveOnline = isOnline && apiReachable;
 
   const refreshQueueCount = useCallback(() => {
     setQueueCount(getQueuedObservations().length);
+    setSyncedCount(getSyncedObservations().length);
   }, []);
 
   useEffect(() => {
@@ -510,11 +558,22 @@ export function useOfflineQueue() {
       throw new Error("Device is currently offline. Connect to network to synchronize pending queue.");
     }
     setSyncing(true);
+    setSyncError(null);
     try {
       const res = await syncOfflineObservations();
       setLastSyncResult(res);
+      if (!res.success && res.errors && res.errors.length > 0) {
+        setSyncError(res.errors[0] || "Sync failed");
+      } else if (res.success && res.syncedCount > 0) {
+        setJustSynced(true);
+        setTimeout(() => setJustSynced(false), 6000);
+      }
       refreshQueueCount();
       return res;
+    } catch (err) {
+      const msg = (err as Error).message || "Sync failed";
+      setSyncError(msg);
+      throw err;
     } finally {
       setSyncing(false);
     }
@@ -522,20 +581,94 @@ export function useOfflineQueue() {
 
   // Auto-sync when coming back online
   useEffect(() => {
-    if (isOnline) {
+    if (effectiveOnline) {
       const currentQueue = getQueuedObservations();
       if (currentQueue.length > 0) {
-        triggerSync();
+        triggerSync().catch(() => {});
       }
     }
-  }, [isOnline, triggerSync]);
+  }, [effectiveOnline, triggerSync]);
+
+  let syncStatus: OfflineSyncStatus = "ONLINE";
+  if (syncing) {
+    syncStatus = "SYNCING";
+  } else if (syncError) {
+    syncStatus = "SYNC FAILED";
+  } else if (!isOnline) {
+    syncStatus = queueCount > 0 ? "PENDING SYNC" : "OFFLINE";
+  } else {
+    if (queueCount > 0) {
+      syncStatus = "PENDING SYNC";
+    } else if (justSynced) {
+      syncStatus = "SYNCED";
+    } else {
+      syncStatus = "ONLINE";
+    }
+  }
 
   return {
     isOnline,
+    effectiveOnline,
+    apiReachable,
+    checkHealth,
     queueCount,
+    syncedCount,
     syncing,
+    syncStatus,
+    syncError,
     lastSyncResult,
     refreshQueueCount,
     triggerSync,
   };
 }
+
+import { getAllZones } from "./geography";
+
+/**
+ * Returns offline overview data from cached package or authoritative 15 monitored hill zones
+ * to prevent route loader crashes when operating without internet connectivity.
+ */
+export function getOfflineOverviewFallback() {
+  const cachedStatus = getCachedOfflinePackage();
+  if (cachedStatus?.package?.zones && cachedStatus.package.zones.length > 0) {
+    return {
+      zones: cachedStatus.package.zones,
+      roads: cachedStatus.package.roads || [],
+      alerts: [],
+      activeModel: cachedStatus.package.active_model || null,
+      candidateModel: null,
+      observations: [],
+    };
+  }
+
+  // Fallback to the authoritative 15 monitored hill zones
+  const fallbackZones = getAllZones().map((z) => ({
+    id: z.id,
+    zone_name: z.name,
+    state: z.state,
+    district: z.district,
+    risk_score: 0,
+    current_risk_level: "UNKNOWN" as const,
+    antecedent_rainfall_mm: null,
+    intensity_rainfall_mm: null,
+    soil_moisture_pct: null,
+    dominant_slope_deg: 25,
+    critical_facilities_count: 0,
+    population_density: 0,
+    last_updated_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    created_at: new Date().toISOString(),
+    explanation: "Offline View: Live server risk telemetry unavailable. Field reporting active.",
+    scientific_limitation: "OFFLINE_CACHED_VIEW",
+  }));
+
+  return {
+    zones: fallbackZones,
+    roads: [],
+    alerts: [],
+    activeModel: null,
+    candidateModel: null,
+    observations: [],
+  };
+}
+

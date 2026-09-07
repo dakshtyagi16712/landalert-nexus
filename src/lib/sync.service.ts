@@ -41,11 +41,15 @@ export interface FieldObservationInput {
   geo_captured_at?: string | undefined;
   consent_given?: boolean | undefined;
   submitter_role?: string | undefined;
-  // Note: initial status is set server-side based on submitter_role.
+  latitude?: number | undefined;
+  longitude?: number | undefined;
+  reporter_name?: string | undefined;
+  reporter_phone?: string | undefined;
+  synced_at?: string | undefined;
   review_status?: ("PENDING_REVIEW" | "APPROVED" | "REJECTED") | undefined;
   report_type?: ("crack" | "slope_movement" | "road_blocked" | "other") | undefined;
   retry_count?: number | undefined;
-  queue_status?: ("PENDING" | "SYNCING" | "FAILED" | "SYNCHRONIZED") | undefined;
+  queue_status?: ("PENDING" | "SYNCING" | "FAILED" | "SYNCHRONIZED" | "PENDING_SYNC" | "SYNCED") | undefined;
   last_error?: string | undefined;
 }
 
@@ -134,7 +138,7 @@ export async function syncFieldObservations(records: FieldObservationInput[]): P
     road_status: "open" | "restricted" | "blocked" | "unknown" | null;
     observer_id: string;
     idempotency_key: string;
-    status: "SUBMITTED" | "PENDING_VERIFICATION" | "VERIFIED" | "REJECTED" | "ACTIONABLE";
+    status: "SUBMITTED" | "PENDING_VERIFICATION" | "OFFICIAL_VERIFIED" | "VERIFIED" | "REJECTED" | "ACTIONABLE";
     is_training_eligible: boolean;
     source: string;
     media_urls: string[];
@@ -144,6 +148,7 @@ export async function syncFieldObservations(records: FieldObservationInput[]): P
     geo_accuracy_m: number | null;
     geo_captured_at: string | null;
     consent_given: boolean;
+    review_status?: "PENDING_REVIEW" | "APPROVED" | "REJECTED";
   }> = [];
 
   const acknowledgedKeys: string[] = [];

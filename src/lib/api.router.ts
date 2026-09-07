@@ -16,6 +16,11 @@ import { getRiskPrediction, validatePredictionInput } from "./ml.service";
 import { evaluateAndDispatchAlert } from "./alert.service";
 import { syncFieldObservations, getOfflinePackage } from "./sync.service";
 import { getZonesGeoJson, getLandslidesGeoJson } from "./gis.service";
+import {
+  getAllVillagesGeoJSON,
+  getAllInfrastructureGeoJSON,
+  computeExposureSummary,
+} from "./infrastructure.service";
 import { ingestLiveRainfallImpl } from "./monitoring.server";
 import { authenticateCronRequest } from "@/integrations/supabase/cron-auth";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
@@ -545,7 +550,88 @@ export async function handleApiRequest(request: Request): Promise<Response | nul
       );
     }
 
-    // LOCALS GPS-proximity and zone-fallback escalation endpoints
+    // 6d. Observation Deletion — Officials Only (VERIFIED_OFFICIAL, DISPATCHER, or ADMIN)
+    if (
+      (pathname === "/api/observations/delete" && request.method === "POST") ||
+      (pathname.startsWith("/api/observations/") && request.method === "DELETE") ||
+      (pathname === "/api/observations" && request.method === "DELETE")
+    ) {
+      // Require authentication
+      const authHeader = request.headers.get("Authorization");
+      if (!authHeader) {
+        return errorResponse(
+          "Authentication required to delete observations",
+          "UNAUTHORIZED",
+          401,
+          cors,
+        );
+      }
+
+      const { authenticateToken: authToken, deleteGroundObservation } = await import("./official-auth.service");
+      const profile = await authToken(authHeader);
+
+      const isAuthorized =
+        profile !== null &&
+        (profile.role === "VERIFIED_OFFICIAL" ||
+          profile.role === "DISPATCHER" ||
+          profile.role === "ADMIN");
+
+      if (!isAuthorized) {
+        return errorResponse(
+          "Forbidden: Only verified government officials, dispatchers, or administrators can delete observations",
+          "FORBIDDEN",
+          403,
+          cors,
+        );
+      }
+
+      let observationId: string | number | undefined;
+      let reason: string | undefined;
+
+      if (request.method === "DELETE" && pathname.startsWith("/api/observations/") && pathname !== "/api/observations/delete") {
+        observationId = pathname.replace("/api/observations/", "").trim();
+      } else {
+        try {
+          const body = await request.json();
+          observationId = body.observation_id || body.id;
+          reason = body.reason;
+        } catch {
+          const url = new URL(request.url);
+          observationId = url.searchParams.get("id") || undefined;
+          reason = url.searchParams.get("reason") || undefined;
+        }
+      }
+
+      if (!observationId) {
+        return errorResponse("observation_id is required", "MISSING_OBSERVATION_ID", 400, cors);
+      }
+
+      const result = await deleteGroundObservation(
+        profile!,
+        String(observationId),
+        reason || "Deleted by authorized official",
+      );
+
+      if (!result.success) {
+        if (result.error?.includes("not found")) {
+          return errorResponse(result.error, "NOT_FOUND", 404, cors);
+        }
+        return errorResponse(result.error ?? "Deletion failed", "DELETE_FAILED", 400, cors);
+      }
+
+      return jsonResponse(
+        {
+          ok: true,
+          observation_id: String(observationId),
+          deleted_by: profile!.id,
+          deleted_at: new Date().toISOString(),
+        },
+        200,
+        cors,
+      );
+    }
+
+    // 6e. LOCALS GPS-proximity and zone-fallback escalation endpoints
     if (pathname === "/api/locals/active" && request.method === "GET") {
       const alerts = await getActiveLocalsAlerts();
       return jsonResponse({ ok: true, alerts }, 200, cors);
@@ -936,6 +1022,61 @@ export async function handleApiRequest(request: Request): Promise<Response | nul
           ...cors,
         },
       });
+    }
+
+    // 10a. GIS GeoJSON - Villages Layer
+    if (pathname === "/api/gis/villages.geojson" && request.method === "GET") {
+      try {
+        const geojson = await getAllVillagesGeoJSON();
+        return jsonResponse(geojson, 200, cors);
+      } catch (err) {
+        return errorResponse(
+          err instanceof Error ? err.message : "Failed to retrieve villages GeoJSON",
+          "INTERNAL_SERVER_ERROR",
+          500,
+          cors,
+        );
+      }
+    }
+
+    // 10b. GIS GeoJSON - Critical Infrastructure Layer
+    if (pathname === "/api/gis/infrastructure.geojson" && request.method === "GET") {
+      try {
+        const geojson = await getAllInfrastructureGeoJSON();
+        return jsonResponse(geojson, 200, cors);
+      } catch (err) {
+        return errorResponse(
+          err instanceof Error ? err.message : "Failed to retrieve infrastructure GeoJSON",
+          "INTERNAL_SERVER_ERROR",
+          500,
+          cors,
+        );
+      }
+    }
+
+    // 10c. Critical Infrastructure Exposure Summary
+    if (pathname === "/api/infrastructure/summary" && request.method === "GET") {
+      const zoneParam = url.searchParams.get("zoneId");
+      if (!zoneParam) {
+        return errorResponse("Missing required parameter: zoneId", "INVALID_ZONE_ID", 400, cors);
+      }
+
+      const zoneId = Number(zoneParam);
+      if (!Number.isInteger(zoneId) || zoneId < 1) {
+        return errorResponse("zoneId must be a valid positive integer", "INVALID_ZONE_ID", 400, cors);
+      }
+
+      try {
+        const summary = await computeExposureSummary(zoneId);
+        return jsonResponse(summary, 200, cors);
+      } catch (err) {
+        return errorResponse(
+          err instanceof Error ? err.message : "Failed to compute exposure summary",
+          "DATABASE_ERROR",
+          500,
+          cors,
+        );
+      }
     }
 
     // 11. Satellite Imagery Status (Sentinel-2 / Copernicus)
