@@ -157,17 +157,23 @@ function RootComponent() {
       }
 
       if ("serviceWorker" in navigator) {
-        window.addEventListener("load", () => {
-          navigator.serviceWorker.register("/sw.js", { scope: "/" }).then(
-            (reg) => {
+        const registerSw = () => {
+          navigator.serviceWorker
+            .register("/sw.js", { scope: "/" })
+            .then((reg) => {
               reg.update();
               console.log("[PWA] ServiceWorker registered with scope:", reg.scope);
-            },
-            (err) => {
+            })
+            .catch((err) => {
               console.warn("[PWA] ServiceWorker registration failed:", err);
-            },
-          );
-        });
+            });
+        };
+
+        if (document.readyState === "complete") {
+          registerSw();
+        } else {
+          window.addEventListener("load", registerSw, { once: true });
+        }
       }
     }
   }, []);

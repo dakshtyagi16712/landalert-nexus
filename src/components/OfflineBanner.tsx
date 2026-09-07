@@ -11,7 +11,7 @@ import { SyncQueueDialog } from "./SyncQueueDialog";
 
 export function OfflineBanner() {
   const { t } = useTranslation();
-  const { isOnline, queueCount, syncing, triggerSync } = useOfflineQueue();
+  const { isOnline, queueCount, syncing, syncStatus, syncError, triggerSync } = useOfflineQueue();
   const [cachedStatus, setCachedStatus] = useState<CachedBundleStatus | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [bannerNotice, setBannerNotice] = useState<string | null>(null);
@@ -40,6 +40,25 @@ export function OfflineBanner() {
     }
   }
 
+  const getStatusBadgeStyle = () => {
+    switch (syncStatus) {
+      case "ONLINE":
+        return "bg-emerald-500/10 text-emerald-400 border-emerald-500/30";
+      case "OFFLINE":
+        return "bg-zinc-800 text-zinc-300 border-zinc-700";
+      case "SYNCING":
+        return "bg-blue-500/20 text-blue-400 border-blue-500/40 animate-pulse";
+      case "PENDING SYNC":
+        return "bg-amber-500/20 text-amber-400 border-amber-500/40";
+      case "SYNCED":
+        return "bg-emerald-500/20 text-emerald-300 border-emerald-500/40";
+      case "SYNC FAILED":
+        return "bg-red-500/20 text-red-400 border-red-500/40";
+      default:
+        return "bg-zinc-800 text-zinc-300 border-zinc-700";
+    }
+  };
+
   return (
     <aside
       aria-label={t("offline.aria_label", "Offline status and synchronization")}
@@ -48,9 +67,17 @@ export function OfflineBanner() {
     >
       <div className="mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
+          {/* Explicit Status Badge required by specification */}
           <span
-            className={`h-2.5 w-2.5 rounded-full ${
-              !isOnline ? "bg-amber-400 animate-pulse" : "bg-blue-400"
+            data-testid="connection-status-badge"
+            className={`inline-flex items-center px-2 py-0.5 rounded border text-[0.65rem] font-bold tracking-wider font-mono ${getStatusBadgeStyle()}`}
+          >
+            {syncStatus}
+          </span>
+
+          <span
+            className={`h-2 w-2 rounded-full ${
+              !isOnline ? "bg-amber-400 animate-pulse" : "bg-emerald-400"
             }`}
           />
           <span className={`font-semibold uppercase tracking-wider ${!isOnline ? "text-amber-400" : ""}`}>

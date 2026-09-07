@@ -478,14 +478,26 @@ export async function downloadAndCacheOfflinePackage(): Promise<OfflinePackage> 
   return pkg as OfflinePackage;
 }
 
+export type OfflineSyncStatus =
+  | "ONLINE"
+  | "OFFLINE"
+  | "SYNCING"
+  | "PENDING SYNC"
+  | "SYNCED"
+  | "SYNC FAILED";
+
 /**
  * Hook to manage offline queue status and provide sync trigger.
  */
 export function useOfflineQueue() {
-  const isOnline = useOnlineStatus();
+  const { isOnline, apiReachable, checkHealth } = useConnectivityStatus();
   const [queueCount, setQueueCount] = useState<number>(0);
   const [syncing, setSyncing] = useState<boolean>(false);
   const [lastSyncResult, setLastSyncResult] = useState<SyncResult | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [justSynced, setJustSynced] = useState<boolean>(false);
+
+  const effectiveOnline = isOnline && apiReachable;
 
   const refreshQueueCount = useCallback(() => {
     setQueueCount(getQueuedObservations().length);
@@ -510,11 +522,22 @@ export function useOfflineQueue() {
       throw new Error("Device is currently offline. Connect to network to synchronize pending queue.");
     }
     setSyncing(true);
+    setSyncError(null);
     try {
       const res = await syncOfflineObservations();
       setLastSyncResult(res);
+      if (!res.success && res.errors && res.errors.length > 0) {
+        setSyncError(res.errors[0] || "Sync failed");
+      } else if (res.success && res.syncedCount > 0) {
+        setJustSynced(true);
+        setTimeout(() => setJustSynced(false), 6000);
+      }
       refreshQueueCount();
       return res;
+    } catch (err) {
+      const msg = (err as Error).message || "Sync failed";
+      setSyncError(msg);
+      throw err;
     } finally {
       setSyncing(false);
     }
@@ -522,18 +545,39 @@ export function useOfflineQueue() {
 
   // Auto-sync when coming back online
   useEffect(() => {
-    if (isOnline) {
+    if (effectiveOnline) {
       const currentQueue = getQueuedObservations();
       if (currentQueue.length > 0) {
-        triggerSync();
+        triggerSync().catch(() => {});
       }
     }
-  }, [isOnline, triggerSync]);
+  }, [effectiveOnline, triggerSync]);
+
+  let syncStatus: OfflineSyncStatus = "ONLINE";
+  if (syncing) {
+    syncStatus = "SYNCING";
+  } else if (syncError) {
+    syncStatus = "SYNC FAILED";
+  } else if (!effectiveOnline) {
+    syncStatus = queueCount > 0 ? "PENDING SYNC" : "OFFLINE";
+  } else {
+    if (queueCount > 0) {
+      syncStatus = "PENDING SYNC";
+    } else if (justSynced) {
+      syncStatus = "SYNCED";
+    } else {
+      syncStatus = "ONLINE";
+    }
+  }
 
   return {
-    isOnline,
+    isOnline: effectiveOnline,
+    apiReachable,
+    checkHealth,
     queueCount,
     syncing,
+    syncStatus,
+    syncError,
     lastSyncResult,
     refreshQueueCount,
     triggerSync,
