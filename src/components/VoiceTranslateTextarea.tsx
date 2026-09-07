@@ -3,12 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import {
-  Mic,
-  Languages,
-  RotateCcw,
-  Loader2,
-} from "lucide-react";
+import { Mic, Languages, RotateCcw, Loader2 } from "lucide-react";
 import { translateToEnglish } from "@/lib/translation.service";
 import { useTranslation } from "react-i18next";
 import { saveOfflineMedia } from "@/lib/offline-media-store";
@@ -34,6 +29,45 @@ const SUPPORTED_VOICE_LANGUAGES = [
   { code: "en-US", name: "🇬🇧 English (Global)", speechCode: "en-US" },
 ];
 
+/** Convert audio Blob → Float32Array at 16 kHz (required by Whisper) */
+async function audioToFloat32At16k(blob: Blob): Promise<Float32Array | null> {
+  try {
+    const arrayBuffer = await blob.arrayBuffer();
+    // Decode at native sample rate
+    const tempCtx = new AudioContext();
+    let audioBuffer: AudioBuffer;
+    try {
+      audioBuffer = await tempCtx.decodeAudioData(arrayBuffer);
+    } finally {
+      await tempCtx.close();
+    }
+    // Resample to 16 kHz via OfflineAudioContext
+    const targetRate = 16000;
+    const targetLength = Math.ceil(audioBuffer.duration * targetRate);
+    const offlineCtx = new OfflineAudioContext(1, targetLength, targetRate);
+    const source = offlineCtx.createBufferSource();
+    source.buffer = audioBuffer;
+    source.connect(offlineCtx.destination);
+    source.start(0);
+    const rendered = await offlineCtx.startRendering();
+    return rendered.getChannelData(0);
+  } catch {
+    return null;
+  }
+}
+
+// Singleton Whisper worker — created once, shared across all instances
+let _whisperWorker: Worker | null = null;
+function getWhisperWorker(): Worker {
+  if (!_whisperWorker) {
+    _whisperWorker = new Worker(
+      new URL("../lib/whisper-worker.ts", import.meta.url),
+      { type: "module" }
+    );
+  }
+  return _whisperWorker;
+}
+
 export function VoiceTranslateTextarea({
   id = "fieldNotesInput",
   value,
@@ -48,26 +82,20 @@ export function VoiceTranslateTextarea({
   const [isListening, setIsListening] = useState(false);
   const [audioRecordDuration, setAudioRecordDuration] = useState(0);
   const [selectedVoiceLang, setSelectedVoiceLang] = useState<string>("auto");
-  const [interimSpokenText, setInterimSpokenText] = useState<string>("");
   const [isTranslating, setIsTranslating] = useState(false);
   const [translationNotice, setTranslationNotice] = useState<string | null>(null);
   const [originalDraft, setOriginalDraft] = useState<string | null>(null);
   const [micSupported, setMicSupported] = useState(true);
+  // Whisper state: 'idle' | 'loading' | 'transcribing'
+  const [whisperState, setWhisperState] = useState<"idle" | "loading" | "transcribing">("idle");
 
-  // MediaRecorder refs — primary recording path, always active
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioStreamRef = useRef<MediaStream | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const recordTimerRef = useRef<any>(null);
   const recordStartTimeRef = useRef<number>(0);
-
-  // SpeechRecognition ref — optional parallel transcription only
-  const recognitionRef = useRef<any>(null);
-
   const isListeningRef = useRef<boolean>(false);
   const valueRef = useRef<string>(value);
-  // Tracks whether SpeechRecognition produced any transcription this session
-  const hasTranscribedRef = useRef<boolean>(false);
 
   useEffect(() => {
     valueRef.current = value;
@@ -91,97 +119,70 @@ export function VoiceTranslateTextarea({
     return "en-IN";
   }, [selectedVoiceLang, i18n.language]);
 
-  const handleTranslateAndAppend = useCallback(
-    async (spokenText: string) => {
-      if (!spokenText.trim()) return;
-      hasTranscribedRef.current = true;
-      setIsTranslating(true);
-      const langCode = getEffectiveSpeechLang();
-      const res = await translateToEnglish(spokenText, langCode.split("-")[0]);
-      setIsTranslating(false);
-      const translated = res.translatedText.trim();
-      if (translated) {
-        const current = (valueRef.current || "").trim();
-        const updated = current ? `${current} ${translated}` : translated;
-        valueRef.current = updated;
-        onChange(updated);
-        const langNotice =
-          res.detectedLang && res.detectedLang !== "en"
-            ? `✓ Translated from ${res.detectedLang.toUpperCase()} → English`
-            : `✓ Transcribed in English`;
-        setTranslationNotice(langNotice);
-        setTimeout(() => setTranslationNotice(null), 4000);
-      }
+  /**
+   * Run Whisper on the recorded audio blob (post-recording).
+   * Returns the transcribed+translated English text, or null on failure.
+   */
+  const transcribeWithWhisper = useCallback(
+    (blob: Blob): Promise<string | null> => {
+      return new Promise(async (resolve) => {
+        // Convert audio to 16kHz Float32
+        const float32 = await audioToFloat32At16k(blob);
+        if (!float32 || float32.length < 1600) {
+          // Too short / failed to decode
+          resolve(null);
+          return;
+        }
+
+        setWhisperState("loading");
+
+        let worker: Worker;
+        try {
+          worker = getWhisperWorker();
+        } catch {
+          resolve(null);
+          return;
+        }
+
+        const handleMessage = (e: MessageEvent) => {
+          const { type, text, error, loaded, total } = e.data;
+          if (type === "loading") {
+            setWhisperState("loading");
+            setTranslationNotice("⏳ Transcription model loading (first time only, ~40MB)…");
+          } else if (type === "progress" && loaded && total) {
+            const pct = Math.round((loaded / total) * 100);
+            setTranslationNotice(`⏳ Loading model… ${pct}%`);
+          } else if (type === "ready") {
+            setWhisperState("transcribing");
+            setTranslationNotice("🔄 Transcribing audio…");
+          } else if (type === "result") {
+            worker.removeEventListener("message", handleMessage);
+            setWhisperState("idle");
+            resolve(text || null);
+          } else if (type === "error") {
+            console.warn("[Whisper] Error:", error);
+            worker.removeEventListener("message", handleMessage);
+            setWhisperState("idle");
+            resolve(null);
+          }
+        };
+
+        worker.addEventListener("message", handleMessage);
+        // After model loads it posts 'ready', then we can use it
+        // But we send the request now — worker queues it after load
+        setWhisperState("transcribing");
+        setTranslationNotice("🔄 Transcribing…");
+        // Transfer Float32Array ownership to avoid copy (perf)
+        const transferable = float32.buffer.slice(0);
+        worker.postMessage(
+          { type: "transcribe", audioData: new Float32Array(transferable) },
+          [transferable as ArrayBuffer]
+        );
+      });
     },
-    [getEffectiveSpeechLang, onChange],
+    [],
   );
 
-  /**
-   * Attach SpeechRecognition as a SILENT optional layer for live transcription.
-   * All errors are swallowed — recognition never affects recording state.
-   */
-  const attachSpeechRecognition = useCallback(() => {
-    if (typeof window === "undefined") return;
-    const SpeechRec =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRec) return;
-    if (typeof navigator !== "undefined" && !navigator.onLine) return;
-
-    try {
-      const recognition = new SpeechRec();
-      recognition.continuous = true;
-      recognition.interimResults = true;
-      recognition.lang = getEffectiveSpeechLang();
-      recognition.maxAlternatives = 1;
-
-      recognition.onresult = (event: any) => {
-        if (!isListeningRef.current) return;
-        let interimStr = "";
-        for (let i = event.resultIndex; i < event.results.length; ++i) {
-          const result = event.results[i];
-          const transcript = result[0]?.transcript || "";
-          if (result.isFinal) {
-            handleTranslateAndAppend(transcript);
-            setInterimSpokenText("");
-          } else {
-            interimStr += transcript;
-          }
-        }
-        if (interimStr) setInterimSpokenText(interimStr);
-      };
-
-      recognition.onend = () => {
-        if (!isListeningRef.current || !recognitionRef.current) return;
-        if (typeof navigator !== "undefined" && navigator.onLine) {
-          try { recognition.start(); } catch { /* ignore */ }
-        }
-      };
-
-      // ALL Speech API errors are silent — recording continues regardless
-      recognition.onerror = (event: any) => {
-        console.info("[VoiceTranslate] Speech recognition (optional):", event.error);
-        if (
-          event.error === "network" ||
-          event.error === "service-not-allowed" ||
-          event.error === "not-allowed" ||
-          event.error === "audio-capture"
-        ) {
-          try { recognition.stop(); } catch {}
-          recognitionRef.current = null;
-        }
-      };
-
-      recognitionRef.current = recognition;
-      recognition.start();
-    } catch {
-      recognitionRef.current = null;
-    }
-  }, [getEffectiveSpeechLang, handleTranslateAndAppend]);
-
-  /**
-   * PRIMARY path: MediaRecorder always starts first — 100% offline-safe.
-   * SpeechRecognition attaches in parallel for optional live transcription.
-   */
   const startListening = useCallback(async () => {
     if (isListeningRef.current) return;
 
@@ -201,7 +202,7 @@ export function VoiceTranslateTextarea({
       } else if (name === "NotFoundError" || name === "DevicesNotFoundError") {
         setTranslationNotice("⚠️ No microphone found on this device.");
       } else {
-        setTranslationNotice("⚠️ Could not access microphone: " + (err?.message || "Unknown error"));
+        setTranslationNotice("⚠️ Could not access microphone.");
       }
       setTimeout(() => setTranslationNotice(null), 6000);
       return;
@@ -209,7 +210,6 @@ export function VoiceTranslateTextarea({
 
     audioStreamRef.current = stream;
     audioChunksRef.current = [];
-    hasTranscribedRef.current = false; // reset for this session
 
     const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
       ? "audio/webm;codecs=opus"
@@ -233,7 +233,7 @@ export function VoiceTranslateTextarea({
       });
 
       if (audioStreamRef.current) {
-        audioStreamRef.current.getTracks().forEach((track) => track.stop());
+        audioStreamRef.current.getTracks().forEach((t) => t.stop());
         audioStreamRef.current = null;
       }
 
@@ -244,68 +244,64 @@ export function VoiceTranslateTextarea({
         recordTimerRef.current = null;
       }
 
+      // Save audio to IndexedDB for offline report attachment
+      let mediaId = "";
       try {
-        const mediaId = `voice_memo_${Date.now()}`;
+        mediaId = `voice_memo_${Date.now()}`;
         await saveOfflineMedia(mediaId, recordedBlob, {
           name: `${mediaId}.webm`,
           mimeType: recordedBlob.type || "audio/webm",
           size: recordedBlob.size,
         });
-
-        // Only append voice tag if SpeechRecognition did NOT produce any transcription
-        // (i.e. offline, or Speech API was blocked/unavailable)
-        if (!hasTranscribedRef.current) {
-          const current = (valueRef.current || "").trim();
-          const voiceTag = `[🎙️ Voice note (${durationSecs}s) — Stored offline]`;
-          const updated = current ? `${current} ${voiceTag}` : voiceTag;
-          valueRef.current = updated;
-          onChange(updated);
-        }
-
-        setTranslationNotice(`✓ Voice recording (${durationSecs}s) saved`);
-        setTimeout(() => setTranslationNotice(null), 5000);
-
         if (onAudioRecorded) onAudioRecorded(recordedBlob, mediaId);
-      } catch (storageErr) {
-        console.warn("[VoiceTranslate] Offline audio save warning:", storageErr);
-        setTranslationNotice(`✓ Voice recording captured (${durationSecs}s)`);
-        setTimeout(() => setTranslationNotice(null), 4000);
+      } catch {
+        // Non-fatal
       }
 
+      // Transcribe with Whisper (works online AND offline after first model load)
+      const transcribed = await transcribeWithWhisper(recordedBlob);
+      setWhisperState("idle");
+      setTranslationNotice(null);
+
+      if (transcribed && transcribed.trim().length > 1) {
+        // Whisper task:'translate' already outputs English — append directly
+        const current = (valueRef.current || "").trim();
+        const updated = current ? `${current} ${transcribed.trim()}` : transcribed.trim();
+        valueRef.current = updated;
+        onChange(updated);
+        setTranslationNotice(`✓ Transcribed (${durationSecs}s) — voice note attached`);
+      } else {
+        // Transcription failed (first-load model issue, very short clip, etc.)
+        // Append a plain audio note tag (no "offline" label — audio is always saved)
+        const current = (valueRef.current || "").trim();
+        const voiceTag = `[🎙️ Voice note (${durationSecs}s)]`;
+        const updated = current ? `${current} ${voiceTag}` : voiceTag;
+        valueRef.current = updated;
+        onChange(updated);
+        setTranslationNotice(`✓ Voice note (${durationSecs}s) saved — transcription pending`);
+      }
+
+      setTimeout(() => setTranslationNotice(null), 5000);
       setIsListening(false);
     };
 
     mediaRecorderRef.current = recorder;
     recorder.start(250);
-
     recordStartTimeRef.current = Date.now();
     setAudioRecordDuration(0);
     isListeningRef.current = true;
     setIsListening(true);
-    setInterimSpokenText("");
 
     recordTimerRef.current = setInterval(() => {
       setAudioRecordDuration(Math.round((Date.now() - recordStartTimeRef.current) / 1000));
     }, 1000);
 
-    setTranslationNotice(
-      typeof navigator !== "undefined" && navigator.onLine
-        ? "🎙️ Recording… Live transcription active if available."
-        : "🎙️ Recording offline voice note — speak clearly."
-    );
-    setTimeout(() => setTranslationNotice(null), 3500);
-
-    // Attach SpeechRecognition as optional parallel transcription
-    attachSpeechRecognition();
-  }, [attachSpeechRecognition, onChange, onAudioRecorded]);
+    setTranslationNotice("🎙️ Recording… Speak clearly. Transcription will run after you stop.");
+    setTimeout(() => setTranslationNotice(null), 4000);
+  }, [transcribeWithWhisper, onChange, onAudioRecorded]);
 
   const stopListening = useCallback(() => {
     isListeningRef.current = false;
-
-    if (recognitionRef.current) {
-      try { recognitionRef.current.stop(); } catch {}
-      recognitionRef.current = null;
-    }
 
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
       try { mediaRecorderRef.current.stop(); } catch {}
@@ -313,7 +309,7 @@ export function VoiceTranslateTextarea({
     }
 
     if (audioStreamRef.current) {
-      audioStreamRef.current.getTracks().forEach((track) => track.stop());
+      audioStreamRef.current.getTracks().forEach((t) => t.stop());
       audioStreamRef.current = null;
     }
 
@@ -323,7 +319,6 @@ export function VoiceTranslateTextarea({
     }
 
     setIsListening(false);
-    setInterimSpokenText("");
   }, []);
 
   const toggleListening = useCallback(
@@ -342,9 +337,6 @@ export function VoiceTranslateTextarea({
   useEffect(() => {
     return () => {
       isListeningRef.current = false;
-      if (recognitionRef.current) {
-        try { recognitionRef.current.stop(); } catch {}
-      }
       if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
         try { mediaRecorderRef.current.stop(); } catch {}
       }
@@ -382,6 +374,8 @@ export function VoiceTranslateTextarea({
     }
   };
 
+  const isBusy = whisperState !== "idle" || isTranslating;
+
   return (
     <div className="grid gap-1.5 text-left">
       <div className="flex items-center justify-between">
@@ -393,22 +387,19 @@ export function VoiceTranslateTextarea({
           <span>{label || t("field_observation.notes_label", "Field Notes & Description")}</span>
         </Label>
 
-        <div className="flex items-center gap-1.5 text-[0.68rem] font-mono">
-          <select
-            value={selectedVoiceLang}
-            onChange={(e) => setSelectedVoiceLang(e.target.value)}
-            disabled={isListening || disabled}
-            aria-label="Voice input language"
-            className="bg-secondary/50 border border-border rounded px-1.5 py-0.5 text-[0.68rem] font-sans text-foreground cursor-pointer focus:outline-none"
-            title="Select the language you will speak or type in"
-          >
-            {SUPPORTED_VOICE_LANGUAGES.map((lang) => (
-              <option key={lang.code} value={lang.code}>
-                {lang.name}
-              </option>
-            ))}
-          </select>
-        </div>
+        <select
+          value={selectedVoiceLang}
+          onChange={(e) => setSelectedVoiceLang(e.target.value)}
+          disabled={isListening || disabled}
+          aria-label="Voice input language"
+          className="bg-secondary/50 border border-border rounded px-1.5 py-0.5 text-[0.68rem] font-sans text-foreground cursor-pointer focus:outline-none"
+        >
+          {SUPPORTED_VOICE_LANGUAGES.map((lang) => (
+            <option key={lang.code} value={lang.code}>
+              {lang.name}
+            </option>
+          ))}
+        </select>
       </div>
 
       <div className="relative">
@@ -421,7 +412,7 @@ export function VoiceTranslateTextarea({
             placeholder ||
             t(
               "field_observation.notes_placeholder",
-              "Speak or type in any language (Hindi, Bengali, Nepali, etc.) — words will be translated to English in real time…",
+              "Speak or type in any language (Hindi, Bengali, Nepali, etc.) — transcribed to English after recording…",
             )
           }
           className="min-h-[85px] bg-secondary/40 border-border font-sans text-xs pr-20 resize-y focus-visible:ring-1 focus-visible:ring-primary"
@@ -433,19 +424,23 @@ export function VoiceTranslateTextarea({
               type="button"
               variant={isListening ? "destructive" : "outline"}
               size="sm"
-              disabled={disabled}
+              disabled={disabled || isBusy}
               onClick={toggleListening}
               className={`h-7 w-7 p-0 rounded-full shadow-sm transition-all ${
                 isListening ? "animate-pulse ring-2 ring-red-400" : "bg-card hover:bg-secondary"
               }`}
               title={
                 isListening
-                  ? t("field_observation.stop_listening", "Stop recording")
-                  : t("field_observation.start_listening", "Record voice note (works offline)")
+                  ? "Stop recording"
+                  : "Record voice note (Whisper AI — works offline)"
               }
               aria-label="Toggle voice recording"
             >
-              <Mic className={`h-3.5 w-3.5 ${isListening ? "text-white" : "text-primary"}`} />
+              {isBusy && !isListening ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+              ) : (
+                <Mic className={`h-3.5 w-3.5 ${isListening ? "text-white" : "text-primary"}`} />
+              )}
             </Button>
           )}
 
@@ -456,7 +451,7 @@ export function VoiceTranslateTextarea({
             disabled={disabled || isTranslating || !value.trim()}
             onClick={handleTranslateExistingText}
             className="h-7 w-7 p-0 rounded-full bg-card hover:bg-secondary shadow-sm"
-            title={t("field_observation.translate_to_english", "Translate text to English")}
+            title="Translate typed text to English"
             aria-label="Translate text to English"
           >
             {isTranslating ? (
@@ -473,7 +468,7 @@ export function VoiceTranslateTextarea({
               size="sm"
               onClick={handleRevertOriginal}
               className="h-6 w-6 p-0 rounded-full text-muted-foreground hover:text-foreground"
-              title={t("field_observation.revert_original", "Show original text before translation")}
+              title="Revert to original"
             >
               <RotateCcw className="h-3 w-3" />
             </Button>
@@ -495,9 +490,10 @@ export function VoiceTranslateTextarea({
             </Badge>
           )}
 
-          {interimSpokenText && (
-            <span className="text-primary truncate italic max-w-xs">
-              "{interimSpokenText}"
+          {(whisperState === "loading" || whisperState === "transcribing") && !isListening && (
+            <span className="text-primary flex items-center gap-1">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              <span>{whisperState === "loading" ? "Loading AI model…" : "Transcribing…"}</span>
             </span>
           )}
 
@@ -509,7 +505,7 @@ export function VoiceTranslateTextarea({
           )}
 
           {translationNotice && (
-            <span className="text-emerald-500 font-semibold">{translationNotice}</span>
+            <span className="text-emerald-500 font-semibold truncate max-w-xs">{translationNotice}</span>
           )}
         </div>
 
