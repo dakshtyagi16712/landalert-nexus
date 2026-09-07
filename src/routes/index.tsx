@@ -149,6 +149,38 @@ function Dashboard() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [locationBannerDismissed, setLocationBannerDismissed] = useState(false);
 
+  // Risk map layer visibility controls (controlled from header dropdown)
+  const [showSpatialGrid, setShowSpatialGrid] = useState(true);
+  const [showInSarDeformation, setShowInSarDeformation] = useState(false);
+  const [showVillages, setShowVillages] = useState(true);
+  const [showInfrastructure, setShowInfrastructure] = useState(true);
+  const [showTrueColor, setShowTrueColor] = useState(false);
+  const [showNdvi, setShowNdvi] = useState(false);
+  const [layersDropdownOpen, setLayersDropdownOpen] = useState(false);
+  const layersDropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (layersDropdownRef.current && !layersDropdownRef.current.contains(event.target as Node)) {
+        setLayersDropdownOpen(false);
+      }
+    }
+    if (!layersDropdownOpen) return;
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [layersDropdownOpen]);
+
+  const satelliteQuery = useQuery({
+    queryKey: ["satellite-status"],
+    queryFn: async () => {
+      const res = await fetch("/api/satellite/status");
+      if (!res.ok) return null;
+      return res.json() as Promise<{ enabled: boolean; configured: boolean }>;
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+  const hasSatellite = Boolean(satelliteQuery.data?.enabled && satelliteQuery.data?.configured);
+
   useEffect(() => {
     // Read initial session
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -871,8 +903,8 @@ function Dashboard() {
                   </p>
                 </div>
 
-                {/* State/Region & District Hierarchical Filter Controls */}
-                <div className="flex flex-wrap items-center gap-1.5">
+                {/* State/Region, District, Layers & Grid Dropdown, and Risk Level Legend */}
+                <div className="flex flex-wrap items-center gap-2">
                   <select
                     aria-label="Filter by region or state"
                     value={stateFilter}
@@ -945,6 +977,147 @@ function Dashboard() {
                       ))}
                     </select>
                   )}
+
+                  {/* Layers & Grid Dropdown (beside North East India dropdown) */}
+                  <div className="relative" ref={layersDropdownRef}>
+                    <button
+                      type="button"
+                      onClick={() => setLayersDropdownOpen((prev) => !prev)}
+                      className="h-8 flex items-center gap-1.5 rounded border border-border bg-background px-2.5 text-xs text-foreground font-sans hover:bg-secondary/40 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary cursor-pointer transition-colors"
+                      aria-expanded={layersDropdownOpen}
+                      aria-haspopup="true"
+                    >
+                      <Layers className="h-3.5 w-3.5 text-primary" />
+                      <span>{t("risk_map.layers_title", "Layers & Grid")}</span>
+                      <ChevronDown className={`h-3 w-3 text-muted-foreground transition-transform ${layersDropdownOpen ? "rotate-180" : ""}`} />
+                    </button>
+
+                    {layersDropdownOpen && (
+                      <div className="absolute right-0 sm:right-auto sm:left-0 top-full mt-1.5 z-50 w-64 rounded-md border border-border bg-surface/98 p-3 shadow-xl backdrop-blur-md text-xs font-mono space-y-2.5">
+                        <div className="flex items-center justify-between border-b border-border/60 pb-1.5">
+                          <span className="font-semibold text-primary uppercase text-[0.68rem] tracking-wider">
+                            {t("risk_map.layers_title", "Layers & Grid")}
+                          </span>
+                          <span
+                            className="text-[0.65rem] text-muted-foreground cursor-help"
+                            title={t("risk_map.spatial_coverage_info", "Continuous 0.25° spatial landslide risk prediction grid across all 8 Northeast states.")}
+                          >
+                            {spatialGridQuery.data?.cells?.length ?? 82} cells
+                          </span>
+                        </div>
+
+                        {/* Spatial Grid Toggle */}
+                        <label className="flex items-center gap-2 cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={showSpatialGrid}
+                            onChange={(e) => setShowSpatialGrid(e.target.checked)}
+                            className="rounded border-border text-primary cursor-pointer"
+                          />
+                          <span className="text-[0.72rem] font-semibold text-foreground">
+                            {t("risk_map.show_spatial_surface", "8-State Spatial Risk Surface")}
+                          </span>
+                        </label>
+
+                        {/* InSAR Ground Deformation Layer Toggle */}
+                        <label className="flex items-center gap-2 cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={showInSarDeformation}
+                            onChange={(e) => setShowInSarDeformation(e.target.checked)}
+                            className="rounded border-border text-violet-500 cursor-pointer"
+                          />
+                          <span className="text-[0.72rem] font-semibold text-foreground flex items-center gap-1.5">
+                            <span className="w-2 h-2 rounded-full bg-violet-500 inline-block" />
+                            {t("risk_map.show_insar_layer", "InSAR Ground Deformation")}
+                          </span>
+                        </label>
+
+                        {/* Villages Layer Toggle */}
+                        <label className="flex items-center gap-2 cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={showVillages}
+                            onChange={(e) => setShowVillages(e.target.checked)}
+                            className="rounded border-border text-sky-500 cursor-pointer"
+                          />
+                          <span className="text-[0.72rem] font-semibold text-foreground flex items-center gap-1.5">
+                            <span className="w-2 h-2 rounded-full bg-sky-500 inline-block" />
+                            {t("risk_map.show_villages", "Villages & Hamlets")}
+                          </span>
+                        </label>
+
+                        {/* Critical Infrastructure Layer Toggle */}
+                        <label className="flex items-center gap-2 cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={showInfrastructure}
+                            onChange={(e) => setShowInfrastructure(e.target.checked)}
+                            className="rounded border-border text-red-500 cursor-pointer"
+                          />
+                          <span className="text-[0.72rem] font-semibold text-foreground flex items-center gap-1.5">
+                            <span className="w-2 h-2 rounded-full bg-red-500 inline-block" />
+                            {t("risk_map.show_infrastructure", "Critical Infrastructure")}
+                          </span>
+                        </label>
+
+                        {/* Satellite Imagery Layer Controls */}
+                        {hasSatellite && (
+                          <div className="pt-2 border-t border-border/50 space-y-2">
+                            <div className="text-[0.65rem] uppercase text-muted-foreground font-semibold">
+                              {t("risk_map.sentinel_visuals", "🛰 Sentinel-2 Visuals")}
+                            </div>
+                            <label className="flex items-center gap-2 cursor-pointer select-none">
+                              <input
+                                type="checkbox"
+                                checked={showTrueColor}
+                                onChange={(e) => setShowTrueColor(e.target.checked)}
+                                className="rounded border-border text-primary cursor-pointer"
+                              />
+                              <span className="text-[0.72rem]">{t("risk_map.true_color", "True-Color Imagery")}</span>
+                            </label>
+                            <label className="flex items-center gap-2 cursor-pointer select-none">
+                              <input
+                                type="checkbox"
+                                checked={showNdvi}
+                                onChange={(e) => setShowNdvi(e.target.checked)}
+                                className="rounded border-border text-primary cursor-pointer"
+                              />
+                              <span className="text-[0.72rem]">{t("risk_map.ndvi_vegetation", "NDVI Vegetation Index")}</span>
+                            </label>
+                            <div className="text-[0.62rem] text-muted-foreground/80 pt-0.5 border-t border-border/30">
+                              {t("risk_map.sentinel_attribution", "Copernicus Sentinel data 2026")}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Risk Level Inline Legend (written as it is) */}
+                  <div className="flex items-center gap-2 rounded border border-border bg-background px-2.5 h-8 text-xs font-sans select-none">
+                    <span className="font-semibold text-[0.7rem] text-foreground font-display">
+                      {t("map_panel.risk_level", "Risk level")}:
+                    </span>
+                    <div className="flex items-center gap-2 text-[0.7rem]">
+                      <div className="flex items-center gap-1">
+                        <span className="h-2 w-2 rounded-full bg-emerald-600 inline-block" />
+                        <span className="text-foreground">{t("risk_levels.Low", "Low")}</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <span className="h-2 w-2 rounded-full bg-yellow-500 inline-block" />
+                        <span className="text-foreground">{t("risk_levels.Moderate", "Moderate")}</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <span className="h-2 w-2 rounded-full bg-orange-500 inline-block" />
+                        <span className="text-foreground">{t("risk_levels.High", "High")}</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <span className="h-2 w-2 rounded-full bg-red-600 inline-block" />
+                        <span className="text-foreground">{t("risk_levels.Severe", "Severe")}</span>
+                      </div>
+                    </div>
+                  </div>
 
                   {(stateFilter !== "All" || districtFilter !== "All" || customCenter !== null || selectedSpatialLocation !== null || selectedCellRisk !== null) && (
                     <button
@@ -1032,32 +1205,22 @@ function Dashboard() {
                     setShowZoneDetails(false);
                     setCustomCenter(cell.centroid);
                   }}
+                  layerControls={{
+                    showSpatialGrid,
+                    setShowSpatialGrid,
+                    showInSarDeformation,
+                    setShowInSarDeformation,
+                    showVillages,
+                    setShowVillages,
+                    showInfrastructure,
+                    setShowInfrastructure,
+                    showTrueColor,
+                    setShowTrueColor,
+                    showNdvi,
+                    setShowNdvi,
+                  }}
+                  hideFloatingControls={true}
                 />
-
-                {/* Floating Legend Top-Right */}
-                <div className="absolute top-3 right-3 z-[400] rounded border border-border bg-surface/95 px-3 py-2 shadow-xs backdrop-blur-xs text-xs font-sans pointer-events-none">
-                  <div className="font-semibold text-[0.72rem] text-foreground mb-1.5 font-display">
-                    {t("map_panel.risk_level", "Risk level")}
-                  </div>
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="h-2.5 w-2.5 rounded-full bg-emerald-600" />
-                      <span className="text-[0.7rem] text-foreground">{t("risk_levels.Low", "Low")}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="h-2.5 w-2.5 rounded-full bg-yellow-500" />
-                      <span className="text-[0.7rem] text-foreground">{t("risk_levels.Moderate", "Moderate")}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="h-2.5 w-2.5 rounded-full bg-orange-500" />
-                      <span className="text-[0.7rem] text-foreground">{t("risk_levels.High", "High")}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="h-2.5 w-2.5 rounded-full bg-red-600" />
-                      <span className="text-[0.7rem] text-foreground">{t("risk_levels.Severe", "Severe")}</span>
-                    </div>
-                  </div>
-                </div>
 
                 {/* Scale Indicator Bottom-Left */}
                 <div className="absolute bottom-3 left-3 z-[400] rounded border border-border bg-surface/90 px-2 py-0.5 text-[0.65rem] font-mono text-muted-foreground pointer-events-none">
