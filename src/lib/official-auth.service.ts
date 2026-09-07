@@ -39,6 +39,7 @@ import {
   type OfficialVerificationStatus,
   type UserProfileVerificationStatus,
   evaluateEmailDomain,
+  getUserAuthorizationState,
 } from "./auth-domains";
 
 export interface UserProfileRecord {
@@ -119,8 +120,8 @@ export const getUserAuthorizationServerFn = createServerFn({ method: "POST" })
     }
 
     const state = getUserAuthorizationState({
-      email: data.email,
-      user_metadata: data.user_metadata,
+      email: data.email ?? null,
+      user_metadata: (data.user_metadata ?? null) as any,
     });
     return {
       role: state.role,
@@ -129,7 +130,7 @@ export const getUserAuthorizationServerFn = createServerFn({ method: "POST" })
           state.role === "DISPATCHER" ||
           state.role === "ADMIN",
       ),
-      verification_status: state.verificationStatus,
+      verification_status: state.status,
       badge: state.badge,
     };
   });

@@ -14,6 +14,8 @@ import {
   getSpatialGridServerFn,
   type ZoneRow,
 } from "@/lib/monitoring.functions";
+import { projectZoneRiskForecast } from "@/lib/forecast.service";
+import type { RiskLevel } from "@/lib/risk";
 import {
   deriveLocationSpatialRisk,
   type LocationSpatialRisk,
@@ -416,8 +418,51 @@ function Dashboard() {
 
   const { data: selectedForecast } = useQuery({
     queryKey: ["weather-forecast", selected?.id],
-    queryFn: () =>
-      selected ? getZoneWeatherRiskForecastServerFn({ data: { zoneId: selected.id } }) : null,
+    queryFn: async () => {
+      if (!selected) return null;
+      try {
+        const serverRes = await getZoneWeatherRiskForecastServerFn({ data: { zoneId: selected.id } });
+        if (serverRes && serverRes.forecastStatus === "AVAILABLE" && serverRes.forecastWindows) {
+          return serverRes;
+        }
+      } catch (err) {
+        console.warn("[Forecast] Server function failed on homepage, trying direct browser weather fetch:", err);
+      }
+
+      // Direct client-side fetch from Open-Meteo as high-resilience fallback
+      try {
+        const lat = selected.centroid_lat ?? 25.5;
+        const lng = selected.centroid_lng ?? 91.8;
+        const res = await fetch(
+          `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&daily=precipitation_sum&forecast_days=4&timezone=UTC`
+        );
+        if (res.ok) {
+          const payload = await res.json();
+          const precip = payload?.daily?.precipitation_sum as (number | null)[] | undefined;
+          if (precip && precip.length >= 4) {
+            const day1 = precip[1] ?? 0;
+            const day2 = precip[2] ?? 0;
+            const day3 = precip[3] ?? 0;
+            return projectZoneRiskForecast({
+              zoneId: selected.id,
+              zoneName: selected.zone_name,
+              district: selected.district,
+              state: selected.state,
+              currentRiskLevel: (selected.current_risk_level as RiskLevel) ?? "Low",
+              currentRiskScore: selected.risk_score ?? 25,
+              threshold_e_mm: selected.threshold_e_mm ?? undefined,
+              forecast_24h_mm: day1,
+              forecast_48h_mm: day1 + day2,
+              forecast_72h_mm: day1 + day2 + day3,
+            });
+          }
+        }
+      } catch (clientErr) {
+        console.warn("[Forecast] Client-side Open-Meteo fallback failed on index:", clientErr);
+      }
+
+      return null;
+    },
     enabled: !!selected,
   });
 
