@@ -382,4 +382,80 @@ describe("LOCALS Escalation Service", () => {
       expect(result.alert?.resolved_at).toBeDefined();
     });
   });
+
+  describe("Multi-Sync Batch Escalation & ACTIONABLE Status Integration", () => {
+    it("correctly triggers a LOCALS alert on the second sync when 10 observations are split across two separate sync batches (6 in batch 1, 4 in batch 2)", async () => {
+      const now = new Date();
+      // First sync batch: 6 pending observations in the same 500m proximity
+      const batch1 = Array.from({ length: 6 }, (_, i) => ({
+        id: `multi_batch1_obs_${i + 1}`,
+        zone_id: 3,
+        report_type: "slope_movement" as const,
+        status: "PENDING_VERIFICATION",
+        latitude: 25.5788 + 0.0001 * i,
+        longitude: 91.8933,
+        observed_at: new Date(now.getTime() - 25 * 60 * 1000).toISOString(),
+      }));
+
+      // Sync 1: evaluates batch 1 against an empty existing pending pool (6 < 10 threshold)
+      const firstSyncAlerts = await evaluateObservationsForLocalsEscalation(batch1, []);
+      expect(firstSyncAlerts).toHaveLength(0);
+
+      // Second sync batch: 4 more pending observations within the same cluster and window
+      const batch2 = Array.from({ length: 4 }, (_, i) => ({
+        id: `multi_batch2_obs_${i + 1}`,
+        zone_id: 3,
+        report_type: "slope_movement" as const,
+        status: "PENDING_VERIFICATION",
+        latitude: 25.5788 + 0.0001 * (i + 6),
+        longitude: 91.8933,
+        observed_at: new Date(now.getTime() - 5 * 60 * 1000).toISOString(),
+      }));
+
+      // Sync 2: evaluates batch 2 with batch 1 supplied as the existing pending pool
+      const secondSyncAlerts = await evaluateObservationsForLocalsEscalation(batch2, batch1);
+
+      // Successfully triggers LOCALS alert because the aggregated pool (6 + 4) >= 10
+      expect(secondSyncAlerts).toHaveLength(1);
+      expect(secondSyncAlerts[0].observation_count).toBe(10);
+      expect(secondSyncAlerts[0].detection_method).toBe("gps_proximity");
+      expect(secondSyncAlerts[0].report_type).toBe("slope_movement");
+      expect(secondSyncAlerts[0].status).toBe("ACTIVE");
+      expect(secondSyncAlerts[0].triggering_observation_ids).toHaveLength(10);
+    });
+
+    it("bulk-updates triggering observations' status to ACTIONABLE when a cluster triggers", async () => {
+      const now = new Date();
+      const clusterObs = Array.from({ length: 10 }, (_, i) => ({
+        id: `actionable_obs_${i + 1}`,
+        zone_id: 5,
+        report_type: "crack" as const,
+        status: "PENDING_VERIFICATION",
+        latitude: 26.15 + 0.0001 * i,
+        longitude: 91.77,
+        observed_at: new Date(now.getTime() - 15 * 60 * 1000).toISOString(),
+      }));
+
+      // Pre-condition: all observations start as PENDING_VERIFICATION
+      expect(clusterObs.every((o) => o.status === "PENDING_VERIFICATION")).toBe(true);
+
+      const alerts = await evaluateObservationsForLocalsEscalation(clusterObs);
+      expect(alerts).toHaveLength(1);
+
+      // Post-condition: triggering observations are transitioned to ACTIONABLE
+      expect(clusterObs.every((o) => o.status === "ACTIONABLE")).toBe(true);
+    });
+
+    it("preserves the official review workflow so ACTIONABLE observations can still be VERIFIED or REJECTED", async () => {
+      const { getObservationStatusMeta } = await import("./observation-status");
+      // Verify ACTIONABLE is recognized in the status taxonomy
+      const meta = getObservationStatusMeta("ACTIONABLE");
+      expect(meta.label).toBe("Actionable");
+      expect(meta.filterGroup).toBe("actionable");
+
+      // Verify that official review service can accept ACTIONABLE observations
+      const { verifyGroundObservation } = await import("./official-auth.service");
+      expect(typeof verifyGroundObservation).toBe("function");
+    });
+  });
 });

@@ -98,7 +98,7 @@ services:
         sync: false
 
       # ── Cron / Ingest auth ───────────────────────────────────────────────────
-      # Required to call /api/ingest-weather and /api/recompute.
+      # Required to call /api/ingest-weather, /api/recompute, and /api/locals/check.
       # Generate: openssl rand -hex 32
       - key: CRON_SECRET
         sync: false
@@ -121,3 +121,15 @@ services:
 
       - key: SATELLITE_LAYER_ENABLED
         value: "false"
+
+  # ── LOCALS Auto-Escalation Check Cron ───────────────────────────────────────
+  # Evaluates pending observations for GPS-proximity clustering every 15 minutes.
+  - type: cron
+    name: locals-cluster-check
+    runtime: node
+    region: oregon
+    schedule: "*/15 * * * *"
+    startCommand: "curl -fsS -X POST https://landalert-nexus.onrender.com/api/locals/check -H \"Authorization: Bearer $CRON_SECRET\""
+    envVars:
+      - key: CRON_SECRET
+        sync: false
