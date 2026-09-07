@@ -208,7 +208,7 @@ export function ConsoleNav() {
                   className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-bold text-red-700 bg-red-50 hover:bg-red-100/90 border border-red-200/90 dark:text-red-300 dark:bg-red-950/50 dark:border-red-800/70 dark:hover:bg-red-900/60 rounded-md shadow-2xs transition-all cursor-pointer"
                 >
                   <Phone className="h-3 w-3 text-red-600 dark:text-red-400 shrink-0 animate-pulse" />
-                  <span>{t("header.help", "Emergency Helpline")}</span>
+                  <span>{t("header.emergency_helpline", "Emergency Helpline")}</span>
                 </button>
               }
             />

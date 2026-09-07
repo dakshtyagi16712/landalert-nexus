@@ -413,7 +413,8 @@
     "accessibility": "Accessibility",
     "operator": "Operator",
     "sign_in": "Sign In",
-    "profile": "Operator Profile"
+    "profile": "Operator Profile",
+    "emergency_helpline": "Emergency Helpline"
   },
   "hero": {
     "region_tag": "NORTH EASTERN REGION",

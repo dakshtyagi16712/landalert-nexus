@@ -626,45 +626,29 @@ function Dashboard() {
   return (
     <div className="min-h-screen bg-background text-foreground font-sans flex flex-col">
       {/* Hero Section */}
-      <section className="relative border-b border-border bg-white dark:bg-card overflow-hidden">
-        <div className="relative mx-auto max-w-[1600px] px-4 py-7 sm:py-8 lg:px-8 flex flex-col md:flex-row md:items-center md:justify-between gap-6 min-h-[160px]">
-          {/* Mountain artwork in center/right background */}
-          <div className="absolute inset-y-0 right-0 sm:right-12 lg:right-72 flex items-end justify-end pointer-events-none overflow-hidden select-none z-0">
-            <img
-              src="/himalaya-hero-trans.png"
-              alt=""
-              aria-hidden="true"
-              className="h-full max-h-[160px] lg:max-h-[180px] w-auto object-contain opacity-85 dark:opacity-35"
-              loading="eager"
-            />
-          </div>
+      <section className="relative border-b border-[#0d233a] bg-[#071a2c] overflow-hidden">
+        {/* Full-bleed background art aligned to the right */}
+        <div className="absolute inset-0 pointer-events-none select-none z-0 overflow-hidden flex justify-end">
+          <img
+            src="/hero-banner-art.png"
+            alt=""
+            aria-hidden="true"
+            className="h-full w-auto min-w-[700px] sm:min-w-[950px] lg:min-w-[1200px] object-cover object-right"
+            loading="eager"
+          />
+        </div>
 
+        <div className="relative mx-auto max-w-[1600px] px-4 py-4 sm:py-5 lg:px-8 flex items-center min-h-[120px] sm:min-h-[125px]">
           <div className="max-w-2xl relative z-10">
-            <span className="text-[0.7rem] sm:text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground font-sans">
+            <span className="text-[0.65rem] sm:text-[0.7rem] font-bold uppercase tracking-[0.22em] text-[#8fa3bf] font-sans">
               {t("hero.region_tag", "NORTH EASTERN REGION")}
             </span>
-            <h1 className="mt-1 text-2xl sm:text-3xl lg:text-[2.25rem] font-bold tracking-tight text-foreground font-display leading-tight">
+            <h1 className="mt-1 text-2xl sm:text-[1.75rem] lg:text-[2rem] font-bold tracking-tight text-white font-sans sm:font-display leading-tight">
               {t("hero.title", "Landslide Early Warning System")}
             </h1>
-            <p className="mt-2 text-xs sm:text-sm text-muted-foreground leading-relaxed max-w-xl">
+            <p className="mt-1.5 text-xs sm:text-[0.8rem] text-[#b0c4de] leading-snug max-w-lg">
               {t("hero.subtitle", "Real-time risk assessment, field observations and decision support for safer communities in North East India.")}
             </p>
-          </div>
-
-          {/* Pillars on Right */}
-          <div className="hidden lg:flex items-center gap-5 text-left shrink-0 relative z-10">
-            <div className="space-y-1 text-xs sm:text-[13px] text-foreground/90 font-medium">
-              <div>{t("hero.observe", "Observe")}</div>
-              <div>{t("hero.assess", "Assess")}</div>
-              <div>{t("hero.respond", "Respond")}</div>
-              <div>{t("hero.protect", "Protect")}</div>
-            </div>
-            <div className="w-5 h-px bg-muted-foreground/50 self-center" aria-hidden="true" />
-            <div className="space-y-1.5 text-[0.65rem] text-muted-foreground uppercase tracking-[0.18em] font-semibold">
-              <div>{t("hero.people", "PEOPLE")}</div>
-              <div>{t("hero.infrastructure", "INFRASTRUCTURE")}</div>
-              <div>{t("hero.communities", "COMMUNITIES")}</div>
-            </div>
           </div>
         </div>
       </section>
