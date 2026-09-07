@@ -21,6 +21,16 @@ describe("Voice Notes & Real-Time English Translation Pipeline", () => {
     // Mock global fetch for unit test predictability
     const originalFetch = globalThis.fetch;
     globalThis.fetch = vi.fn().mockImplementation(async (url: any) => {
+      if (typeof url === "string" && url.includes("translate.googleapis.com")) {
+        return new Response(
+          JSON.stringify([
+            [["Stones are falling from the mountain and the road is blocked", "पहाड़ से पत्थर गिर रहे हैं और सड़क बंद है", null, null]],
+            null,
+            "hi",
+          ]),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
       if (typeof url === "string" && url.includes("/api/translate")) {
         return new Response(
           JSON.stringify({

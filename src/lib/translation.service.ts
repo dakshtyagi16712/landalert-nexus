@@ -32,7 +32,7 @@ const OFFLINE_TERMS: Record<string, string> = {
   "बन्द": "blocked",
   "दरार": "crack / fissure",
   "খহনীয়া": "landslide / erosion",
-  "ভূমিধ্বস": "landslide",
+  "भूमिধ্বস": "landslide",
   "পাহাড়": "mountain / slope",
   "বৃষ্টি": "rain",
   "রাস্তা": "road",
@@ -41,8 +41,8 @@ const OFFLINE_TERMS: Record<string, string> = {
 
 /**
  * Translates given text into English.
- * 1. Tries local backend endpoint `/api/translate`
- * 2. Falls back to direct Google Translate public client API
+ * 1. Direct browser-to-Google Translate (avoids Render datacenter IP rate limits & latency)
+ * 2. Falls back to backend `/api/translate` endpoint if browser fetch fails
  * 3. Falls back to offline dictionary if completely offline
  */
 export async function translateToEnglish(
@@ -59,13 +59,44 @@ export async function translateToEnglish(
     };
   }
 
-  // If text is purely ASCII letters, numbers, and basic punctuation with no non-English words,
-  // it might already be English, but we still allow translation if specifically requested.
   const isPureAscii = /^[\x00-\x7F]*$/.test(trimmed);
-
   const sl = sourceLang && sourceLang !== "auto" ? (sourceLang.split("-")[0] || "auto").toLowerCase() : "auto";
 
-  // 1. Try internal `/api/translate` endpoint
+  // 1. Direct client-side Google Translate public API (Fastest: <100ms from user's IP, bypasses Render)
+  try {
+    const gtxUrl = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${encodeURIComponent(
+      sl,
+    )}&tl=en&dt=t&q=${encodeURIComponent(trimmed)}`;
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 4000);
+
+    const gtxRes = await fetch(gtxUrl, { signal: controller.signal });
+    clearTimeout(timeoutId);
+
+    if (gtxRes.ok) {
+      const gtxData = await gtxRes.json();
+      let translated = "";
+      if (Array.isArray(gtxData[0])) {
+        translated = gtxData[0]
+          .map((chunk: any) => chunk[0])
+          .filter(Boolean)
+          .join("");
+      }
+      if (translated && translated.trim()) {
+        return {
+          translatedText: translated.trim(),
+          originalText: trimmed,
+          detectedLang: gtxData[2] || sl,
+          success: true,
+        };
+      }
+    }
+  } catch {
+    // Direct client fetch failed or timed out — proceed to backend proxy fallback
+  }
+
+  // 2. Fallback to `/api/translate` backend proxy
   try {
     const res = await fetch("/api/translate", {
       method: "POST",
@@ -79,9 +110,9 @@ export async function translateToEnglish(
 
     if (res.ok) {
       const data = await res.json();
-      if (data.success && data.translatedText) {
+      if (data.success && data.translatedText && data.translatedText !== trimmed) {
         return {
-          translatedText: data.translatedText,
+          translatedText: data.translatedText.trim(),
           originalText: trimmed,
           detectedLang: data.detectedLang || sl,
           success: true,
@@ -89,36 +120,7 @@ export async function translateToEnglish(
       }
     }
   } catch {
-    // Network error or offline - proceed to client fallback
-  }
-
-  // 2. Direct client-side Google Translate public endpoint fallback
-  try {
-    const gtxUrl = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${encodeURIComponent(
-      sl,
-    )}&tl=en&dt=t&q=${encodeURIComponent(trimmed)}`;
-
-    const gtxRes = await fetch(gtxUrl);
-    if (gtxRes.ok) {
-      const gtxData = await gtxRes.json();
-      let translated = "";
-      if (Array.isArray(gtxData[0])) {
-        translated = gtxData[0]
-          .map((chunk: any) => chunk[0])
-          .filter(Boolean)
-          .join("");
-      }
-      if (translated) {
-        return {
-          translatedText: translated,
-          originalText: trimmed,
-          detectedLang: gtxData[2] || sourceLang,
-          success: true,
-        };
-      }
-    }
-  } catch {
-    // Both endpoints unavailable, proceed to offline fallback
+    // Both network endpoints unavailable — proceed to offline fallback
   }
 
   // 3. Offline heuristic dictionary fallback
