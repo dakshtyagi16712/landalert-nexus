@@ -457,21 +457,37 @@ export async function syncFieldObservations(records: FieldObservationInput[]): P
   // Trigger LOCALS auto-escalation evaluation for synchronized pending observations
   if (validRows.length > 0) {
     try {
-      let existingPendingPool: any[] = [];
+      const windowAgo = new Date(Date.now() - LOCALS_WINDOW_HOURS * 3600000).toISOString();
+      const syncedKeys = validRows.map((r) => r.idempotency_key).filter(Boolean) as string[];
+
+      // Fetch the full pending pool from the last 1-hour window (includes the just-synced rows with real DB IDs)
+      let fullPendingPool: any[] = [];
       try {
-        const windowAgo = new Date(Date.now() - LOCALS_WINDOW_HOURS * 3600000).toISOString();
         const { data } = await supabaseAdmin
           .from("field_observations")
           .select("*")
           .or("status.eq.PENDING_VERIFICATION,status.eq.SUBMITTED")
           .gte("observed_at", windowAgo)
           .order("observed_at", { ascending: false });
-        if (data) existingPendingPool = data;
+        if (data) fullPendingPool = data;
       } catch (err: any) {
         console.warn("[LOCALS Sync pending pool query]", err?.message || err);
       }
 
-      await evaluateObservationsForLocalsEscalation(validRows as any, existingPendingPool).catch((err) =>
+      // Split: newObservations = the rows we just synced (now with real DB IDs)
+      //        existingPendingPool = the rest of the window (pre-existing observations)
+      const syncedKeySet = new Set(syncedKeys);
+      const newlySyncedDbRows = fullPendingPool.filter(
+        (row) => row.idempotency_key && syncedKeySet.has(row.idempotency_key),
+      );
+      const existingPendingPool = fullPendingPool.filter(
+        (row) => !row.idempotency_key || !syncedKeySet.has(row.idempotency_key),
+      );
+
+      // Only evaluate if we found the synced rows in the DB (i.e., they have real IDs now)
+      const rowsToEvaluate = newlySyncedDbRows.length > 0 ? newlySyncedDbRows : (validRows as any);
+
+      await evaluateObservationsForLocalsEscalation(rowsToEvaluate, existingPendingPool).catch((err) =>
         console.warn("[LOCALS Escalation Evaluation Notice]", err?.message || err),
       );
     } catch {
