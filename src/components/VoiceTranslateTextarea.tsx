@@ -55,7 +55,15 @@ export function VoiceTranslateTextarea({
   const [speechSupported, setSpeechSupported] = useState(true);
 
   const recognitionRef = useRef<any>(null);
-  const silenceTimerRef = useRef<any>(null);
+  const isListeningRef = useRef<boolean>(false);
+  const userManuallyStoppedRef = useRef<boolean>(false);
+  const restartTimeoutRef = useRef<any>(null);
+  const valueRef = useRef<string>(value);
+
+  // Keep valueRef synchronized to prevent stale closures in async speech events
+  useEffect(() => {
+    valueRef.current = value;
+  }, [value]);
 
   // Check Web Speech API support
   useEffect(() => {
@@ -70,12 +78,18 @@ export function VoiceTranslateTextarea({
   // Map app locale to default speech recognition language
   const getEffectiveSpeechLang = useCallback(() => {
     if (selectedVoiceLang !== "auto") return selectedVoiceLang;
-    const current = i18n.language || "en";
+    const current = (i18n.language || "").toLowerCase();
     if (current.startsWith("hi")) return "hi-IN";
     if (current.startsWith("bn")) return "bn-IN";
     if (current.startsWith("as")) return "as-IN";
     if (current.startsWith("ne")) return "ne-NP";
-    return "hi-IN"; // Default to Hindi for auto-multilingual in India if undetermined
+    if (current.startsWith("en")) return "en-IN";
+
+    // Check browser navigator language
+    if (typeof navigator !== "undefined" && navigator.language) {
+      return navigator.language;
+    }
+    return "en-IN";
   }, [selectedVoiceLang, i18n.language]);
 
   // Translate spoken or typed chunk and append to English text box
@@ -91,13 +105,15 @@ export function VoiceTranslateTextarea({
       const translated = res.translatedText.trim();
 
       if (translated) {
-        const current = (value || "").trim();
+        const current = (valueRef.current || "").trim();
         const updated = current ? `${current} ${translated}` : translated;
+        valueRef.current = updated;
         onChange(updated);
 
-        const langNotice = res.detectedLang && res.detectedLang !== "en"
-          ? `✓ Translated from ${res.detectedLang.toUpperCase()} → English`
-          : `✓ Transcribed in English`;
+        const langNotice =
+          res.detectedLang && res.detectedLang !== "en"
+            ? `✓ Translated from ${res.detectedLang.toUpperCase()} → English`
+            : `✓ Transcribed in English`;
         setTranslationNotice(langNotice);
         setTimeout(() => setTranslationNotice(null), 4000);
       }
@@ -105,35 +121,75 @@ export function VoiceTranslateTextarea({
     [getEffectiveSpeechLang, onChange],
   );
 
-  // Toggle speech recognition
-  const toggleSpeechRecognition = () => {
-    if (disabled) return;
-
-    if (isListening) {
-      stopListening();
-      return;
+  const stopListening = useCallback(() => {
+    userManuallyStoppedRef.current = true;
+    isListeningRef.current = false;
+    if (restartTimeoutRef.current) {
+      clearTimeout(restartTimeoutRef.current);
+      restartTimeoutRef.current = null;
     }
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch {}
+      recognitionRef.current = null;
+    }
+    setIsListening(false);
+    setInterimSpokenText("");
+  }, []);
 
-    startListening();
-  };
-
-  const startListening = () => {
+  const startListening = useCallback(async () => {
     if (typeof window === "undefined") return;
     const SpeechRec = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRec) {
       setSpeechSupported(false);
+      setTranslationNotice("⚠️ Speech recognition not supported in this browser. Please type and use Translate.");
       return;
     }
 
+    // Explicitly prompt / verify microphone permission via getUserMedia first.
+    // In Chromium and Safari, calling SpeechRecognition directly without granted permission
+    // causes the engine to immediately abort and fire onend/onerror silently.
+    if (navigator?.mediaDevices?.getUserMedia) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        // Release the test tracks immediately so SpeechRecognition has clean exclusive hardware access
+        stream.getTracks().forEach((track) => track.stop());
+      } catch (err: any) {
+        console.warn("[VoiceTranslate] Mic permission error:", err);
+        isListeningRef.current = false;
+        setIsListening(false);
+        if (err?.name === "NotAllowedError" || err?.name === "PermissionDeniedError") {
+          setTranslationNotice("⚠️ Microphone access blocked. Please allow mic in browser address bar.");
+        } else if (err?.name === "NotFoundError" || err?.name === "DevicesNotFoundError") {
+          setTranslationNotice("⚠️ No microphone device detected.");
+        } else {
+          setTranslationNotice("⚠️ Could not access microphone: " + (err?.message || "Permission required"));
+        }
+        setTimeout(() => setTranslationNotice(null), 6000);
+        return;
+      }
+    }
+
     try {
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch {}
+        recognitionRef.current = null;
+      }
+
       const recognition = new SpeechRec();
       recognition.continuous = true;
       recognition.interimResults = true;
       recognition.lang = getEffectiveSpeechLang();
+      recognition.maxAlternatives = 1;
 
       recognition.onstart = () => {
         setIsListening(true);
+        isListeningRef.current = true;
         setInterimSpokenText("");
+        setTranslationNotice(null);
       };
 
       recognition.onresult = (event: any) => {
@@ -155,44 +211,98 @@ export function VoiceTranslateTextarea({
       };
 
       recognition.onerror = (event: any) => {
-        console.warn("[SpeechRecognition] error:", event.error);
-        if (event.error !== "no-speech") {
+        console.warn("[SpeechRecognition] error event:", event.error);
+        if (event.error === "no-speech") {
+          // Simply silence or pause; do not terminate the session
+          return;
+        }
+
+        if (event.error === "not-allowed" || event.error === "service-not-allowed") {
+          userManuallyStoppedRef.current = true;
+          isListeningRef.current = false;
           setIsListening(false);
+          setTranslationNotice("⚠️ Microphone access blocked. Please allow mic in browser address bar.");
+          setTimeout(() => setTranslationNotice(null), 6000);
+        } else if (event.error === "audio-capture") {
+          userManuallyStoppedRef.current = true;
+          isListeningRef.current = false;
+          setIsListening(false);
+          setTranslationNotice("⚠️ Microphone busy or not connected.");
+          setTimeout(() => setTranslationNotice(null), 6000);
+        } else if (event.error === "network") {
+          userManuallyStoppedRef.current = true;
+          isListeningRef.current = false;
+          setIsListening(false);
+          setTranslationNotice("⚠️ Speech service network error. You can type and use 🌐 Translate.");
+          setTimeout(() => setTranslationNotice(null), 6000);
         }
       };
 
       recognition.onend = () => {
+        // Web Speech API triggers onend on any pause or phrase completion.
+        // If user did NOT explicitly click stop, automatically restart after 150ms to keep listening continuously.
+        if (isListeningRef.current && !userManuallyStoppedRef.current) {
+          if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
+          restartTimeoutRef.current = setTimeout(() => {
+            if (isListeningRef.current && !userManuallyStoppedRef.current && recognitionRef.current) {
+              try {
+                recognitionRef.current.start();
+              } catch (err) {
+                console.warn("[SpeechRecognition] Auto-restart warning:", err);
+              }
+            }
+          }, 150);
+          return;
+        }
+
         setIsListening(false);
+        isListeningRef.current = false;
         setInterimSpokenText("");
       };
 
+      userManuallyStoppedRef.current = false;
+      isListeningRef.current = true;
       recognitionRef.current = recognition;
       recognition.start();
-    } catch (err) {
+    } catch (err: any) {
       console.warn("[SpeechRecognition] Start failed:", err);
+      isListeningRef.current = false;
       setIsListening(false);
+      setTranslationNotice("⚠️ Could not start voice typing: " + (err?.message || "Unknown error"));
+      setTimeout(() => setTranslationNotice(null), 5000);
     }
-  };
+  }, [getEffectiveSpeechLang, handleTranslateAndAppend]);
 
-  const stopListening = () => {
-    if (silenceTimerRef.current) {
-      clearTimeout(silenceTimerRef.current);
-      silenceTimerRef.current = null;
-    }
-    if (recognitionRef.current) {
-      try {
-        recognitionRef.current.stop();
-      } catch {}
-      recognitionRef.current = null;
-    }
-    setIsListening(false);
-    setInterimSpokenText("");
-  };
+  // Toggle speech recognition
+  const toggleSpeechRecognition = useCallback(
+    async (e?: React.MouseEvent) => {
+      if (e) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+      if (disabled) return;
+
+      if (isListeningRef.current) {
+        stopListening();
+        return;
+      }
+
+      await startListening();
+    },
+    [disabled, startListening, stopListening],
+  );
 
   // Clean up on unmount
   useEffect(() => {
     return () => {
-      stopListening();
+      userManuallyStoppedRef.current = true;
+      isListeningRef.current = false;
+      if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch {}
+      }
     };
   }, []);
 

@@ -7,7 +7,7 @@ import {
   getLocalizedDistrict,
   getLocalizedState,
 } from "@/lib/geo-translations";
-import { getUserAuthorizationState } from "@/lib/official-auth.service";
+import { getUserAuthorizationState } from "@/lib/auth-domains";
 import { scoreZonePrioritization } from "@/lib/prioritization.service";
 import { cn } from "@/lib/utils";
 import {

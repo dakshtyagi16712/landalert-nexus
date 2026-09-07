@@ -27,7 +27,7 @@ import { Camera, Video, Upload } from "lucide-react";
 import { ObservationCameraModal } from "@/components/ObservationCameraModal";
 import { VoiceTranslateTextarea } from "@/components/VoiceTranslateTextarea";
 import { useUserLocation } from "@/hooks/useUserLocation";
-import { extractReportType } from "@/lib/locals-escalation.service";
+import { extractReportType } from "@/lib/locals-types";
 import { useTranslation } from "react-i18next";
 import { getLocalizedZoneName, getLocalizedDistrict, getLocalizedState } from "@/lib/geo-translations";
 
