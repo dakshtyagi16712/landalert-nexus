@@ -19,14 +19,33 @@ interface VoiceTranslateTextareaProps {
   onAudioRecorded?: (blob: Blob, mediaId: string) => void;
 }
 
-const SUPPORTED_VOICE_LANGUAGES = [
-  { code: "auto", name: "🌐 Auto / Current App Language", speechCode: "" },
-  { code: "hi", name: "🇮🇳 Hindi (हिन्दी)", speechCode: "hi-IN" },
-  { code: "bn", name: "🇮🇳 Bengali (বাংলা)", speechCode: "bn-IN" },
-  { code: "as", name: "🇮🇳 Assamese (অসমীয়া)", speechCode: "as-IN" },
-  { code: "ne", name: "🇮🇳 Nepali (नेपाली)", speechCode: "ne-NP" },
-  { code: "en", name: "🇮🇳 English", speechCode: "en-IN" },
+interface LanguageOption {
+  code: string;
+  label: string;
+  speechCode: string;
+  whisperLang: string;
+}
+
+const QUICK_LANGUAGES: LanguageOption[] = [
+  { code: "hi", label: "🇮🇳 हिन्दी", speechCode: "hi-IN", whisperLang: "hi" },
+  { code: "en", label: "🇬🇧 English", speechCode: "en-IN", whisperLang: "en" },
+  { code: "bn", label: "বাংলা", speechCode: "bn-IN", whisperLang: "bn" },
+  { code: "ne", label: "नेपाली", speechCode: "ne-NP", whisperLang: "ne" },
+  { code: "as", label: "অসমীয়া", speechCode: "as-IN", whisperLang: "as" },
 ];
+
+const EXTRA_LANGUAGES: LanguageOption[] = [
+  { code: "mr", label: "मराठी (Marathi)", speechCode: "mr-IN", whisperLang: "mr" },
+  { code: "gu", label: "ગુજરાતી (Gujarati)", speechCode: "gu-IN", whisperLang: "gu" },
+  { code: "pa", label: "ਪੰਜਾਬੀ (Punjabi)", speechCode: "pa-IN", whisperLang: "pa" },
+  { code: "ta", label: "தமிழ் (Tamil)", speechCode: "ta-IN", whisperLang: "ta" },
+  { code: "te", label: "తెలుగు (Telugu)", speechCode: "te-IN", whisperLang: "te" },
+  { code: "kn", label: "ಕನ್ನಡ (Kannada)", speechCode: "kn-IN", whisperLang: "kn" },
+  { code: "ml", label: "മലയാളം (Malayalam)", speechCode: "ml-IN", whisperLang: "ml" },
+  { code: "ur", label: "اردو (Urdu)", speechCode: "ur-IN", whisperLang: "ur" },
+];
+
+const ALL_LANGUAGES = [...QUICK_LANGUAGES, ...EXTRA_LANGUAGES];
 
 // ─── Singleton Whisper pipeline (loaded on-demand, cached in browser) ────────
 let _whisperPipeline: any = null;
@@ -121,7 +140,18 @@ export function VoiceTranslateTextarea({
   const { t, i18n } = useTranslation();
   const [isListening, setIsListening] = useState(false);
   const [audioRecordDuration, setAudioRecordDuration] = useState(0);
-  const [selectedLang, setSelectedLang] = useState("auto");
+
+  // Default to Hindi for India disaster reporting, or active app locale if Indic
+  const [selectedLang, setSelectedLang] = useState<string>(() => {
+    const current = (i18n?.language || "").toLowerCase();
+    if (current.startsWith("bn")) return "bn";
+    if (current.startsWith("ne")) return "ne";
+    if (current.startsWith("as")) return "as";
+    if (current.startsWith("hi")) return "hi";
+    // Primary field reporting language across Indian disaster zones
+    return "hi";
+  });
+
   const [isTranslating, setIsTranslating] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [originalDraft, setOriginalDraft] = useState<string | null>(null);
@@ -153,53 +183,39 @@ export function VoiceTranslateTextarea({
     if (ms > 0) setTimeout(() => setNotice(null), ms);
   }, []);
 
-  const getEffectiveSpeechLang = useCallback(() => {
-    if (selectedLang !== "auto") {
-      const match = SUPPORTED_VOICE_LANGUAGES.find((l) => l.code === selectedLang);
-      if (match?.speechCode) return match.speechCode;
-    }
-    const current = (i18n.language || "").toLowerCase();
-    if (current.startsWith("hi")) return "hi-IN";
-    if (current.startsWith("bn")) return "bn-IN";
-    if (current.startsWith("as")) return "as-IN";
-    if (current.startsWith("ne")) return "ne-NP";
-    if (current.startsWith("en")) return "en-IN";
-    if (typeof navigator !== "undefined" && navigator.language) return navigator.language;
-    return "en-IN";
-  }, [selectedLang, i18n.language]);
-
-  const getWhisperLang = useCallback(() => {
-    if (selectedLang !== "auto") return selectedLang;
-    const lang = (i18n.language || navigator?.language || "en").toLowerCase();
-    if (lang.startsWith("hi")) return "hi";
-    if (lang.startsWith("bn")) return "bn";
-    if (lang.startsWith("as")) return "as";
-    if (lang.startsWith("ne")) return "ne";
-    return undefined; // Auto-detect
-  }, [selectedLang, i18n.language]);
+  // Find active language configuration (guaranteed non-null fallback to Hindi)
+  const activeLangConfig: LanguageOption =
+    ALL_LANGUAGES.find((l) => l.code === selectedLang) || QUICK_LANGUAGES[0]!;
 
   const handleLiveTranslateAndAppend = useCallback(
     async (spokenText: string) => {
-      if (!spokenText.trim()) return;
+      const trimmed = spokenText.trim();
+      if (!trimmed) return;
       hasLiveTranscribedRef.current = true;
       setIsTranslating(true);
-      const langCode = getEffectiveSpeechLang();
-      const res = await translateToEnglish(spokenText, langCode.split("-")[0]);
-      setIsTranslating(false);
-      const translated = res.translatedText.trim();
-      if (translated) {
-        const current = (valueRef.current || "").trim();
-        const updated = current ? `${current} ${translated}` : translated;
-        valueRef.current = updated;
-        onChange(updated);
-        showNotice(
-          res.detectedLang && res.detectedLang !== "en"
-            ? `✓ Translated from ${res.detectedLang.toUpperCase()} → English`
-            : "✓ Transcribed in English"
-        );
+
+      try {
+        // Translate spoken text (in selected language) to English
+        const res = await translateToEnglish(trimmed, activeLangConfig.code);
+        const translated = res.translatedText.trim();
+        if (translated) {
+          const current = (valueRef.current || "").trim();
+          const updated = current ? `${current} ${translated}` : translated;
+          valueRef.current = updated;
+          onChange(updated);
+          showNotice(
+            activeLangConfig.code !== "en"
+              ? `✓ Translated from ${activeLangConfig.label} → English`
+              : "✓ Transcribed in English"
+          );
+        }
+      } catch (err) {
+        console.warn("[VoiceTranslate] Live translation error:", err);
+      } finally {
+        setIsTranslating(false);
       }
     },
-    [getEffectiveSpeechLang, onChange, showNotice]
+    [activeLangConfig, onChange, showNotice]
   );
 
   const attachSpeechRecognition = useCallback(() => {
@@ -213,7 +229,8 @@ export function VoiceTranslateTextarea({
       const recognition = new SpeechRec();
       recognition.continuous = true;
       recognition.interimResults = false;
-      recognition.lang = getEffectiveSpeechLang();
+      // Use exact speech recognition language code (e.g. hi-IN, bn-IN, en-IN)
+      recognition.lang = activeLangConfig.speechCode;
       recognition.maxAlternatives = 1;
 
       recognition.onresult = (event: any) => {
@@ -245,12 +262,12 @@ export function VoiceTranslateTextarea({
     } catch {
       recognitionRef.current = null;
     }
-  }, [getEffectiveSpeechLang, handleLiveTranslateAndAppend]);
+  }, [activeLangConfig.speechCode, handleLiveTranslateAndAppend]);
 
-  // ── Post-recording Whisper transcription fallback ─────────────────────────
+  // ── Post-recording Whisper transcription + translation fallback ───────────
   const transcribeBlob = useCallback(async (blob: Blob, durationSecs: number) => {
     setProcessingAudio(true);
-    showNotice("🔄 Converting speech to English text…", 0);
+    showNotice(`🔄 Transcribing ${activeLangConfig.label} speech…`, 0);
 
     try {
       const float32 = await blobToFloat32(blob);
@@ -258,32 +275,41 @@ export function VoiceTranslateTextarea({
 
       const pipe = await getWhisperPipeline((msg) => setNotice(msg));
 
-      const whisperLang = getWhisperLang();
+      // Transcribe in native language first (far more accurate than tiny model translation)
       const result = await pipe(float32, {
-        task: "translate", // Always output English
-        language: whisperLang,
+        task: "transcribe",
+        language: activeLangConfig.whisperLang,
         chunk_length_s: 30,
         stride_length_s: 5,
         return_timestamps: false,
       });
 
-      const text: string = (
+      const rawText: string = (
         Array.isArray(result)
           ? result.map((r: any) => r.text).join(" ")
           : result?.text || ""
       ).trim();
 
-      if (text && text.length > 1) {
+      if (rawText && rawText.length > 1) {
+        showNotice("🔄 Translating to English…", 0);
+        // Translate the native transcription to English using Google Translate / offline dict
+        const translationRes = await translateToEnglish(rawText, activeLangConfig.code);
+        const finalText = translationRes.translatedText.trim() || rawText;
+
         const current = (valueRef.current || "").trim();
-        const updated = current ? `${current} ${text}` : text;
+        const updated = current ? `${current} ${finalText}` : finalText;
         valueRef.current = updated;
         onChange(updated);
-        showNotice(`✓ Transcribed to English (${durationSecs}s)`);
+        showNotice(
+          activeLangConfig.code !== "en"
+            ? `✓ Transcribed & translated from ${activeLangConfig.label} (${durationSecs}s)`
+            : `✓ Transcribed in English (${durationSecs}s)`
+        );
       } else {
         throw new Error("empty-result");
       }
     } catch (err) {
-      console.warn("[VoiceTranslate] Transcription failed:", err);
+      console.warn("[VoiceTranslate] Whisper fallback failed:", err);
       // Fallback: plain voice note tag
       const current = (valueRef.current || "").trim();
       const tag = `[🎙️ Voice note (${durationSecs}s)]`;
@@ -294,7 +320,7 @@ export function VoiceTranslateTextarea({
     } finally {
       setProcessingAudio(false);
     }
-  }, [getWhisperLang, onChange, showNotice]);
+  }, [activeLangConfig, onChange, showNotice]);
 
   const startListening = useCallback(async () => {
     if (isListeningRef.current) return;
@@ -359,9 +385,9 @@ export function VoiceTranslateTextarea({
         // Non-fatal
       }
 
-      // If live transcription already captured the text, skip post-processing
+      // If live transcription already captured the text, skip Whisper
       if (hasLiveTranscribedRef.current) {
-        showNotice(`✓ Live transcribed (${durationSecs}s)`);
+        showNotice(`✓ Live translated (${durationSecs}s)`);
       } else {
         await transcribeBlob(blob, durationSecs);
       }
@@ -374,15 +400,15 @@ export function VoiceTranslateTextarea({
     isListeningRef.current = true;
     setIsListening(true);
 
-    // Try parallel live speech recognition
+    // Try parallel live speech recognition in selected language
     attachSpeechRecognition();
 
     recordTimerRef.current = setInterval(() => {
       setAudioRecordDuration(Math.round((Date.now() - recordStartRef.current) / 1000));
     }, 1000);
 
-    showNotice("🎙️ Listening… speak in your language.", 4000);
-  }, [attachSpeechRecognition, transcribeBlob, onAudioRecorded, showNotice]);
+    showNotice(`🎙️ Listening in ${activeLangConfig.label}… speak clearly.`, 4000);
+  }, [activeLangConfig, attachSpeechRecognition, transcribeBlob, onAudioRecorded, showNotice]);
 
   const stopListening = useCallback(() => {
     isListeningRef.current = false;
@@ -427,7 +453,7 @@ export function VoiceTranslateTextarea({
     if (!value.trim()) return;
     setIsTranslating(true);
     setOriginalDraft(value.trim());
-    const res = await translateToEnglish(value.trim(), "auto");
+    const res = await translateToEnglish(value.trim(), selectedLang || "auto");
     setIsTranslating(false);
     if (res.success && res.translatedText) {
       onChange(res.translatedText);
@@ -451,7 +477,8 @@ export function VoiceTranslateTextarea({
 
   return (
     <div className="grid gap-1.5 text-left">
-      <div className="flex items-center justify-between">
+      {/* Label and Language Selection Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-1.5">
         <Label
           htmlFor={id}
           className="text-xs font-mono uppercase text-muted-foreground flex items-center gap-1.5"
@@ -460,17 +487,43 @@ export function VoiceTranslateTextarea({
           <span>{label || t("field_observation.notes_label", "Field Notes & Description")}</span>
         </Label>
 
-        <select
-          value={selectedLang}
-          onChange={(e) => setSelectedLang(e.target.value)}
-          disabled={isListening || disabled}
-          aria-label="Voice language"
-          className="bg-secondary/50 border border-border rounded px-1.5 py-0.5 text-[0.68rem] font-sans text-foreground cursor-pointer focus:outline-none"
-        >
-          {SUPPORTED_VOICE_LANGUAGES.map((l) => (
-            <option key={l.code} value={l.code}>{l.name}</option>
+        {/* Quick Language Selection Chips */}
+        <div className="flex items-center gap-1 flex-wrap">
+          <span className="text-[0.62rem] font-mono text-muted-foreground mr-0.5">
+            Voice:
+          </span>
+          {QUICK_LANGUAGES.map((l) => (
+            <button
+              key={l.code}
+              type="button"
+              disabled={isListening || disabled}
+              onClick={() => setSelectedLang(l.code)}
+              className={`text-[0.68rem] px-2 py-0.5 rounded transition-all cursor-pointer font-sans ${
+                selectedLang === l.code
+                  ? "bg-primary text-primary-foreground font-semibold shadow-xs"
+                  : "bg-secondary/60 text-muted-foreground hover:text-foreground hover:bg-secondary border border-border/50"
+              }`}
+            >
+              {l.label}
+            </button>
           ))}
-        </select>
+
+          {/* More languages dropdown */}
+          <select
+            value={QUICK_LANGUAGES.some((q) => q.code === selectedLang) ? "" : selectedLang}
+            onChange={(e) => {
+              if (e.target.value) setSelectedLang(e.target.value);
+            }}
+            disabled={isListening || disabled}
+            aria-label="More voice languages"
+            className="bg-secondary/60 border border-border/50 rounded px-1 py-0.5 text-[0.65rem] font-sans text-muted-foreground cursor-pointer focus:outline-none"
+          >
+            <option value="" disabled>More…</option>
+            {EXTRA_LANGUAGES.map((l) => (
+              <option key={l.code} value={l.code}>{l.label}</option>
+            ))}
+          </select>
+        </div>
       </div>
 
       <div className="relative">
@@ -483,7 +536,7 @@ export function VoiceTranslateTextarea({
             placeholder ||
             t(
               "field_observation.notes_placeholder",
-              "Speak or type in any language — auto-transcribes and translates to English…",
+              `Speak in ${activeLangConfig.label} or type in any language — auto-translates to English…`,
             )
           }
           className="min-h-[85px] bg-secondary/40 border-border font-sans text-xs pr-20 resize-y focus-visible:ring-1 focus-visible:ring-primary"
@@ -500,7 +553,11 @@ export function VoiceTranslateTextarea({
               className={`h-7 w-7 p-0 rounded-full shadow-sm transition-all ${
                 isListening ? "animate-pulse ring-2 ring-red-400" : "bg-card hover:bg-secondary"
               }`}
-              title={isListening ? "Stop recording" : "Record voice (translates to English)"}
+              title={
+                isListening
+                  ? "Stop recording"
+                  : `Speak in ${activeLangConfig.label} (auto-translates to English)`
+              }
               aria-label="Toggle voice recording"
             >
               {isBusy && !isListening ? (
@@ -551,7 +608,7 @@ export function VoiceTranslateTextarea({
             >
               <Mic className="h-3 w-3" />
               <span>
-                REC {Math.floor(audioRecordDuration / 60)}:{(audioRecordDuration % 60).toString().padStart(2, "0")}
+                REC {Math.floor(audioRecordDuration / 60)}:{(audioRecordDuration % 60).toString().padStart(2, "0")} • {activeLangConfig.label}
               </span>
             </Badge>
           )}
@@ -559,14 +616,14 @@ export function VoiceTranslateTextarea({
           {processingAudio && !isListening && (
             <span className="text-primary flex items-center gap-1">
               <Loader2 className="h-3 w-3 animate-spin" />
-              <span>Processing audio…</span>
+              <span>Processing speech…</span>
             </span>
           )}
 
           {isTranslating && (
             <span className="text-muted-foreground flex items-center gap-1">
               <Loader2 className="h-3 w-3 animate-spin text-primary" />
-              <span>{t("field_observation.translating_to_en", "Translating…")}</span>
+              <span>{t("field_observation.translating_to_en", "Translating to English…")}</span>
             </span>
           )}
 

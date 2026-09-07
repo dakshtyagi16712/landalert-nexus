@@ -63,6 +63,8 @@ export async function translateToEnglish(
   // it might already be English, but we still allow translation if specifically requested.
   const isPureAscii = /^[\x00-\x7F]*$/.test(trimmed);
 
+  const sl = sourceLang && sourceLang !== "auto" ? (sourceLang.split("-")[0] || "auto").toLowerCase() : "auto";
+
   // 1. Try internal `/api/translate` endpoint
   try {
     const res = await fetch("/api/translate", {
@@ -70,7 +72,7 @@ export async function translateToEnglish(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         text: trimmed,
-        sourceLang: sourceLang === "auto" ? "auto" : sourceLang,
+        sourceLang: sl,
         targetLang: "en",
       }),
     });
@@ -81,7 +83,7 @@ export async function translateToEnglish(
         return {
           translatedText: data.translatedText,
           originalText: trimmed,
-          detectedLang: data.detectedLang || sourceLang,
+          detectedLang: data.detectedLang || sl,
           success: true,
         };
       }
@@ -93,7 +95,7 @@ export async function translateToEnglish(
   // 2. Direct client-side Google Translate public endpoint fallback
   try {
     const gtxUrl = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${encodeURIComponent(
-      sourceLang,
+      sl,
     )}&tl=en&dt=t&q=${encodeURIComponent(trimmed)}`;
 
     const gtxRes = await fetch(gtxUrl);
