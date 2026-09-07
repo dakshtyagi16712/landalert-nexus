@@ -454,13 +454,17 @@ export async function syncFieldObservations(records: FieldObservationInput[]): P
     throw new Error(`Failed to sync field observations: ${errMessage}`);
   }
 
-  // Trigger LOCALS auto-escalation evaluation for synchronized pending observations
+  // Trigger LOCALS auto-escalation evaluation for synchronized pending observations.
+  // We re-query the just-synced rows from the DB so they carry real integer IDs —
+  // the in-memory validRows objects have no `id` field and would silently break
+  // the deduplication step inside evaluateObservationsForLocalsEscalation.
   if (validRows.length > 0) {
     try {
       const windowAgo = new Date(Date.now() - LOCALS_WINDOW_HOURS * 3600000).toISOString();
-      const syncedKeys = validRows.map((r) => r.idempotency_key).filter(Boolean) as string[];
+      const syncedKeySet = new Set(
+        validRows.map((r) => r.idempotency_key).filter(Boolean) as string[],
+      );
 
-      // Fetch the full pending pool from the last 1-hour window (includes the just-synced rows with real DB IDs)
       let fullPendingPool: any[] = [];
       try {
         const { data } = await supabaseAdmin
@@ -474,9 +478,8 @@ export async function syncFieldObservations(records: FieldObservationInput[]): P
         console.warn("[LOCALS Sync pending pool query]", err?.message || err);
       }
 
-      // Split: newObservations = the rows we just synced (now with real DB IDs)
-      //        existingPendingPool = the rest of the window (pre-existing observations)
-      const syncedKeySet = new Set(syncedKeys);
+      // newlySyncedDbRows: the observations we just inserted, now with real DB IDs.
+      // existingPendingPool: all other PENDING observations already in the window.
       const newlySyncedDbRows = fullPendingPool.filter(
         (row) => row.idempotency_key && syncedKeySet.has(row.idempotency_key),
       );
@@ -484,14 +487,13 @@ export async function syncFieldObservations(records: FieldObservationInput[]): P
         (row) => !row.idempotency_key || !syncedKeySet.has(row.idempotency_key),
       );
 
-      // Only evaluate if we found the synced rows in the DB (i.e., they have real IDs now)
-      const rowsToEvaluate = newlySyncedDbRows.length > 0 ? newlySyncedDbRows : (validRows as any);
-
-      await evaluateObservationsForLocalsEscalation(rowsToEvaluate, existingPendingPool).catch((err) =>
-        console.warn("[LOCALS Escalation Evaluation Notice]", err?.message || err),
-      );
+      if (newlySyncedDbRows.length > 0) {
+        await evaluateObservationsForLocalsEscalation(newlySyncedDbRows, existingPendingPool).catch(
+          (err) => console.warn("[LOCALS Escalation Evaluation Notice]", err?.message || err),
+        );
+      }
     } catch {
-      // Non-blocking escalation
+      // Non-blocking — escalation must never break observation persistence
     }
   }
 
