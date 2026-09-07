@@ -2,6 +2,11 @@ import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 import { queryOptions, useSuspenseQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
+import {
+  getLocalizedZoneName,
+  getLocalizedDistrict,
+  getLocalizedState,
+} from "@/lib/geo-translations";
 import { getUserAuthorizationState } from "@/lib/official-auth.service";
 import {
   Area,
@@ -94,7 +99,7 @@ export const Route = createFileRoute("/zones/$id")({
 });
 
 function ZonePage() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { id } = Route.useParams();
   const { data } = useSuspenseQuery(zoneQuery(Number(id)));
   const qc = useQueryClient();
@@ -203,7 +208,7 @@ function ZonePage() {
             <DialogContent className="sm:max-w-[480px] bg-surface text-foreground border-border">
               <DialogHeader>
                 <DialogTitle className="text-xl font-display uppercase tracking-wide">
-                  {t("alerts.dispatch_alert")}: {zone.zone_name}
+                  {t("alerts.dispatch_alert")}: {getLocalizedZoneName(zone.id, zone.zone_name, t)}
                 </DialogTitle>
                 <DialogDescription className="text-xs text-muted-foreground">
                   {t("alerts.dispatcher_decision_notice")}
@@ -334,9 +339,9 @@ function ZonePage() {
       <header className="mt-4 flex flex-wrap items-start justify-between gap-4">
         <div>
           <div className="label-caps">{t("zone_detail.zone_brief")}</div>
-          <h1 className="mt-1 text-3xl font-semibold uppercase tracking-wide">{zone.zone_name}</h1>
+          <h1 className="mt-1 text-3xl font-semibold uppercase tracking-wide">{getLocalizedZoneName(zone.id, zone.zone_name, t)}</h1>
           <p className="text-sm text-muted-foreground">
-            {zone.district} district · {zone.state} · {zone.population.toLocaleString("en-IN")}{" "}
+            {getLocalizedDistrict(zone.district, t)} {t("dashboard.district_label", "district")} · {getLocalizedState(zone.state, t)} · {zone.population.toLocaleString(i18n.language || "en-IN")}{" "}
             {t("zone_detail.residents")}
           </p>
           <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">

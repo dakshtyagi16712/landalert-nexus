@@ -30,6 +30,12 @@ import {
   ForecastRiskBadge,
   PrioritizationScoreBadge,
 } from "@/components/RiskBits";
+import {
+  getLocalizedZoneName,
+  getLocalizedDistrict,
+  getLocalizedState,
+  getLocalizedAlertMessage,
+} from "@/lib/geo-translations";
 import { PanelSkeleton, RouteError } from "@/components/ConsoleShell";
 import { FieldObservationDialog } from "@/components/FieldObservationDialog";
 import { RoadNetworkDialog } from "@/components/RoadNetworkDialog";
@@ -89,7 +95,7 @@ import {
 } from "@/lib/geography";
 
 function Dashboard() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { data } = useSuspenseQuery(overviewQuery);
   const dataZonesRef = useRef(data.zones);
   dataZonesRef.current = data.zones;
@@ -501,7 +507,7 @@ function Dashboard() {
                       .filter((s: string) => s !== "All")
                       .map((s: string) => (
                         <option key={s} value={s}>
-                          {s}
+                          {getLocalizedState(s, t)}
                         </option>
                       ))}
                   </select>
@@ -537,10 +543,10 @@ function Dashboard() {
                       }}
                       className="h-8 rounded border border-border bg-background px-2 text-xs text-foreground font-sans focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary cursor-pointer"
                     >
-                      <option value="All">{t("map_panel.all_districts", `All Districts in ${stateFilter}`)}</option>
+                      <option value="All">{t("map_panel.all_districts", `All Districts in ${getLocalizedState(stateFilter, t)}`)}</option>
                       {availableDistricts.map((d) => (
                         <option key={d.id} value={d.name}>
-                          {d.name} {d.zoneIds.length > 0 ? `(${d.zoneIds.length} station)` : ""}
+                          {getLocalizedDistrict(d.name, t)} {d.zoneIds.length > 0 ? `(${d.zoneIds.length} station)` : ""}
                         </option>
                       ))}
                     </select>
@@ -685,12 +691,12 @@ function Dashboard() {
                   <div>
                     <span className="label-caps">{t("dashboard.zone_overview", "Selected Zone Operational Brief")}</span>
                     <h3 className="text-xl font-bold text-foreground font-display mt-0.5">
-                      {selected.zone_name}
+                      {getLocalizedZoneName(selected.id, selected.zone_name, t)}
                     </h3>
                     <p className="text-xs text-muted-foreground">
-                      {selected.district} district · {selected.state} ·{" "}
-                      {selected.population.toLocaleString("en-IN")} residents ·{" "}
-                      {selected.mean_slope_deg}° mean slope
+                      {getLocalizedDistrict(selected.district, t)} {t("dashboard.district_label", "district")} · {getLocalizedState(selected.state, t)} ·{" "}
+                      {selected.population.toLocaleString(i18n.language || "en-IN")} {t("dashboard.residents", "residents")} ·{" "}
+                      {selected.mean_slope_deg}° {t("dashboard.mean_slope", "mean slope")}
                     </p>
                     <div className="mt-2 flex items-center gap-2">
                       <FreshnessBadge
@@ -817,7 +823,7 @@ function Dashboard() {
                             type="button"
                             className="w-full rounded border border-border bg-surface px-3 py-2 text-xs font-medium text-foreground hover:bg-secondary transition-colors cursor-pointer"
                           >
-                            + {t("dashboard.report_observation_for_zone", "Report Observation for {{zone}}", { zone: selected.zone_name })}
+                            + {t("dashboard.report_observation_for_zone", "Report Observation for {{zone}}", { zone: getLocalizedZoneName(selected.id, selected.zone_name, t) })}
                           </button>
                         }
                         onSuccess={() => qc.invalidateQueries()}
@@ -995,10 +1001,10 @@ function Dashboard() {
                         </td>
                         <td className="py-2.5 px-2.5">
                           <span className="font-semibold text-foreground block font-display">
-                            {item.zoneName}
+                            {getLocalizedZoneName(item.zoneId, item.zoneName, t)}
                           </span>
                           <span className="text-[0.65rem] text-muted-foreground">
-                            {item.district}, {item.state}
+                            {getLocalizedDistrict(item.district, t)}, {getLocalizedState(item.state, t)}
                           </span>
                         </td>
                         <td className="py-2.5 px-2.5 whitespace-nowrap">
@@ -1148,7 +1154,7 @@ function Dashboard() {
                     {observationsList.map((obs: any) => {
                       const cleanObs = sanitizeObservationRecord(obs);
                       const z = data.zones.find((x: ZoneRow) => x.id === cleanObs.zone_id);
-                      const loc = z ? `${z.zone_name}, ${z.state}` : `Zone ${cleanObs.zone_id}`;
+                      const loc = z ? `${getLocalizedZoneName(z.id, z.zone_name, t)}, ${getLocalizedState(z.state, t)}` : t("zones.generic", "Zone {{id}}", { id: cleanObs.zone_id });
                       const typeLabel =
                         cleanObs.visual_signs ||
                         (cleanObs.road_status && cleanObs.road_status !== "open" ? `Road ${cleanObs.road_status}` : "Slope Movement");
@@ -1301,12 +1307,15 @@ function Dashboard() {
                 <tbody className="divide-y divide-border/60">
                   {data.alerts.slice(0, 6).map((a: any) => {
                     const z = data.zones.find((x: ZoneRow) => x.id === a.zone_id);
-                    const location = z ? `${z.zone_name}, ${z.state}` : `Zone ${a.zone_id}`;
+                    const location = z ? `${getLocalizedZoneName(z.id, z.zone_name, t)}, ${getLocalizedState(z.state, t)}` : t("zones.generic", "Zone {{id}}", { id: a.zone_id });
+                    const displayMessage = z
+                      ? getLocalizedAlertMessage(getLocalizedZoneName(z.id, z.zone_name, t), a.risk_level, t)
+                      : a.message;
                     return (
                       <tr key={a.id} className="hover:bg-secondary/20 transition-colors">
                         <td className="py-2.5 px-3 font-mono text-[0.7rem] whitespace-nowrap text-muted-foreground">
-                          {new Date(a.dispatched_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}{" "}
-                          {new Date(a.dispatched_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: false })}
+                          {new Date(a.dispatched_at).toLocaleDateString(i18n.language || "en-IN", { day: "2-digit", month: "short" })}{" "}
+                          {new Date(a.dispatched_at).toLocaleTimeString(i18n.language || "en-IN", { hour: "2-digit", minute: "2-digit", hour12: false })}
                         </td>
                         <td className="py-2.5 px-3 whitespace-nowrap">
                           <RiskBadge
@@ -1318,7 +1327,7 @@ function Dashboard() {
                           {location}
                         </td>
                         <td className="py-2.5 px-3 text-muted-foreground text-[0.72rem] line-clamp-2 max-w-xs">
-                          {a.message}
+                          {displayMessage}
                         </td>
                       </tr>
                     );

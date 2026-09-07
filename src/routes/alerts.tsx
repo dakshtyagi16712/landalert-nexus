@@ -3,6 +3,11 @@ import { queryOptions, useSuspenseQuery, useQueryClient } from "@tanstack/react-
 import { useMemo, useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { getOverview, dispatchAlertServerFn, retractAlertServerFn } from "@/lib/monitoring.functions";
+import {
+  getLocalizedZoneName,
+  getLocalizedZoneLocation,
+  getLocalizedExplanation,
+} from "@/lib/geo-translations";
 import { RiskBadge } from "@/components/RiskBits";
 import { PanelSkeleton, RouteError } from "@/components/ConsoleShell";
 import { Button } from "@/components/ui/button";
@@ -105,13 +110,21 @@ export const Route = createFileRoute("/alerts")({
 });
 
 function AlertsPage() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const { data } = useSuspenseQuery(overviewQuery);
   const qc = useQueryClient();
   const [lang, setLang] = useState("en");
   const [level, setLevel] = useState("All");
   const [selectedZoneFilter, setSelectedZoneFilter] = useState<string>("All");
+
+  // Keep alert template language in sync with global header language switcher
+  useEffect(() => {
+    const current = (i18n.resolvedLanguage || i18n.language || "en").split("-")[0];
+    if (current && TEMPLATES[current]) {
+      setLang(current);
+    }
+  }, [i18n.language, i18n.resolvedLanguage]);
 
   // Seamlessly transition if the user navigates directly to /alerts#risk-map or similar hash anchors
   useEffect(() => {
@@ -132,7 +145,7 @@ function AlertsPage() {
   // Alert dispatch modal state
   const [openDispatch, setOpenDispatch] = useState(false);
   const [targetZoneId, setTargetZoneId] = useState<number>(data.zones[0]?.id ?? 1);
-  const [targetLang, setTargetLang] = useState<"en" | "as" | "bn" | "ne">("en");
+  const [targetLang, setTargetLang] = useState<string>("en");
   const [targetChannel, setTargetChannel] = useState<"sms" | "push" | "both">("both");
   const [justification, setJustification] = useState("");
   const [dispatching, setDispatching] = useState(false);
@@ -277,7 +290,7 @@ function AlertsPage() {
                   <SelectContent className="bg-surface border-border max-h-56">
                     {data.zones.map((z: any) => (
                       <SelectItem key={z.id} value={String(z.id)} className="text-xs font-mono">
-                        Zone {z.id}: {z.zone_name} ({z.current_risk_level})
+                        {String(t("zones.label", { defaultValue: `Zone ${z.id}`, id: z.id }))}: {getLocalizedZoneName(z.id, z.zone_name, t)} ({String(t(`risk_levels.${z.current_risk_level}`, { defaultValue: z.current_risk_level }))})
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -291,16 +304,21 @@ function AlertsPage() {
                   </label>
                   <Select
                     value={targetLang}
-                    onValueChange={(v) => setTargetLang(v as "en" | "as" | "bn" | "ne")}
+                    onValueChange={(v) => setTargetLang(v)}
                   >
                     <SelectTrigger id="target-lang-select" aria-label={t("alerts.select_language")} className="bg-secondary/40 border-border font-mono text-xs">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent className="bg-surface border-border">
                       <SelectItem value="en">English</SelectItem>
-                      <SelectItem value="as">অসমীয়া</SelectItem>
+                      <SelectItem value="hi">हिन्दी</SelectItem>
                       <SelectItem value="bn">বাংলা</SelectItem>
+                      <SelectItem value="as">অসমীয়া</SelectItem>
                       <SelectItem value="ne">नेपाली</SelectItem>
+                      <SelectItem value="mni">মণিপুরী</SelectItem>
+                      <SelectItem value="lus">Mizo</SelectItem>
+                      <SelectItem value="kha">Khasi</SelectItem>
+                      <SelectItem value="grt">Garo</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -395,7 +413,7 @@ function AlertsPage() {
               </SelectItem>
               {data.zones.map((z: any) => (
                 <SelectItem key={z.id} value={String(z.id)} className="text-xs font-mono">
-                  {z.zone_name}
+                  {getLocalizedZoneName(z.id, z.zone_name, t)}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -422,7 +440,9 @@ function AlertsPage() {
       <div className="mt-6 space-y-4">
         {alerts.map((a: any) => {
           const zone = data.zones.find((z: any) => z.id === a.zone_id);
-          const zoneName = zone ? `${zone.zone_name} (${zone.district}, ${zone.state})` : `Zone ${a.zone_id}`;
+          const zoneName = zone
+            ? getLocalizedZoneLocation(zone, t)
+            : t("zones.generic", "Zone {{id}}", { id: a.zone_id });
           const isDelivered = (a as { delivery_status?: string }).delivery_status === "delivered";
 
           const isRetracted = Boolean((a as any).is_retracted || (a as any).status === "retracted");
@@ -502,7 +522,7 @@ function AlertsPage() {
                 <div className="rounded border border-border bg-surface-raised p-3">
                   <div className="label-caps">{t("alerts.hydrological_reasoning")}</div>
                   <p className="mt-2 text-xs leading-relaxed text-foreground/90">
-                    {a.explanation}
+                    {getLocalizedExplanation(a.explanation, t, lang)}
                   </p>
                 </div>
               </div>

@@ -604,7 +604,7 @@ export const getZonesGeoJsonServerFn = createServerFn({ method: "GET" }).handler
 
 export interface DispatchAlertInput {
   zoneId: number;
-  language?: "en" | "bn" | "as" | "ne" | undefined;
+  language?: string | undefined;
   channel?: "sms" | "push" | "both" | undefined;
   idempotencyKey?: string | undefined;
   justification?: string | undefined;

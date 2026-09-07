@@ -25,6 +25,7 @@ import {
 import { FieldObservationDialog } from "./FieldObservationDialog";
 import { sanitizeObservationRecord, sanitizeObservationList } from "@/lib/observation-sanitizer";
 import { getOfflineMedia } from "@/lib/offline-media-store";
+import { getLocalizedZoneName, getLocalizedDistrict, getLocalizedState } from "@/lib/geo-translations";
 
 interface Props {
   observations: ObservationRow[];
@@ -220,10 +221,16 @@ export function ObservationDetailsDialog({
                   return (
                     <div className="text-xs space-y-1 text-muted-foreground">
                       <div>
-                        <span className="font-semibold text-foreground">{z ? z.zone_name : `Zone ${activeObs.zone_id}`}</span>
+                        <span className="font-semibold text-foreground">
+                          {z ? getLocalizedZoneName(z.id, z.zone_name, t) : `Zone ${activeObs.zone_id}`}
+                        </span>
                       </div>
                       <div>
-                        <span>{z ? `${z.district} District, ${z.state}` : `Zone ID: ${activeObs.zone_id}`}</span>
+                        <span>
+                          {z
+                            ? `${getLocalizedDistrict(z.district, t)} District, ${getLocalizedState(z.state, t)}`
+                            : `Zone ID: ${activeObs.zone_id}`}
+                        </span>
                       </div>
                       {activeObs.geo_lat && activeObs.geo_lng && (
                         <div className="font-mono text-[0.7rem] text-primary pt-1">
@@ -509,7 +516,9 @@ export function ObservationDetailsDialog({
                 <tbody className="divide-y divide-border/60">
                   {filteredObservations.map((obs) => {
                     const z = zoneMap.get(obs.zone_id);
-                    const loc = z ? `${z.zone_name}, ${z.state}` : `Zone ${obs.zone_id}`;
+                    const loc = z
+                      ? `${getLocalizedZoneName(z.id, z.zone_name, t)}, ${getLocalizedState(z.state, t)}`
+                      : `Zone ${obs.zone_id}`;
                     const typeLabel =
                       obs.visual_signs ||
                       (obs.road_status && obs.road_status !== "open" ? `Road ${obs.road_status}` : "Slope Movement");

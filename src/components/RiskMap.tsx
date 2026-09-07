@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import type { ZoneRow, SlideRow } from "@/lib/monitoring.functions";
 import { riskColor, zonePolygon } from "@/lib/risk";
 import { useTranslation } from "react-i18next";
+import { getLocalizedZoneName } from "@/lib/geo-translations";
 import type { CellRiskEvaluation } from "@/lib/spatial-risk.service";
 
 function MapResizeHandler({
@@ -269,7 +270,7 @@ export default function RiskMap({
           >
             <Tooltip direction="top" opacity={1}>
               <span className="font-mono text-xs">
-                {z.zone_name} — {t(`risk_levels.${z.current_risk_level}`, z.current_risk_level)} ({z.risk_score})
+                {getLocalizedZoneName(z.id, z.zone_name, t)} — {t(`risk_levels.${z.current_risk_level}`, z.current_risk_level)} ({z.risk_score})
               </span>
             </Tooltip>
           </Polygon>

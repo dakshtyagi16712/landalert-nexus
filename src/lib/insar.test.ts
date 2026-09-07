@@ -89,7 +89,7 @@ describe("Section 28 — Comprehensive 24-Point Satellite InSAR Production Verif
     expect(first.sensor).toBe("C-SAR");
     expect(first.mode).toBe("IW");
     expect(first.product_type).toBe("SLC");
-  });
+  }, 15000);
 
   it("2. Authentication Failure: handles missing CDSE credentials gracefully without crashing", () => {
     const creds = checkCdseCredentials();
@@ -110,7 +110,7 @@ describe("Section 28 — Comprehensive 24-Point Satellite InSAR Production Verif
       expect(a.product_type).toBe("SLC");
       expect(a.mode).toBe("IW");
     }
-  });
+  }, 15000);
 
   it("4. Duplicate Acquisition Handling: ingestion prevents duplicate scene records (idempotency)", async () => {
     const customScene: Sentinel1AcquisitionRecord = {

@@ -27,6 +27,7 @@ import { Capacitor } from "@capacitor/core";
 import { Geolocation as CapGeolocation } from "@capacitor/geolocation";
 import { Camera as CapCamera, CameraResultType, CameraSource } from "@capacitor/camera";
 import { useTranslation } from "react-i18next";
+import { getLocalizedZoneName, getLocalizedDistrict, getLocalizedState } from "@/lib/geo-translations";
 
 interface Props {
   initialZoneId?: number;
@@ -730,7 +731,7 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
                   <SelectContent className="bg-surface border-border max-h-60 z-[150]">
                     {Object.keys(NER_GEOGRAPHY).map((st) => (
                       <SelectItem key={st} value={st} className="text-xs font-mono">
-                        {st}
+                        {getLocalizedState(st, t)}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -749,7 +750,7 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
                   <SelectContent className="bg-surface border-border max-h-60 z-[150]">
                     {(NER_GEOGRAPHY[selectedState]?.districts || []).map((dst) => (
                       <SelectItem key={dst} value={dst} className="text-xs font-mono">
-                        {dst}
+                        {getLocalizedDistrict(dst, t)}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -765,8 +766,8 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
                 </Label>
                 <span className="text-[0.62rem] text-muted-foreground">
                   {currentDistrictZones.length > 0
-                    ? `${currentDistrictZones.length} active station(s) in ${selectedDistrict}`
-                    : `District-level coverage (${selectedDistrict})`}
+                    ? `${currentDistrictZones.length} active station(s) in ${getLocalizedDistrict(selectedDistrict, t)}`
+                    : `District-level coverage (${getLocalizedDistrict(selectedDistrict, t)})`}
                 </span>
               </div>
 
@@ -784,7 +785,7 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
                   <SelectContent className="bg-surface border-border max-h-60 z-[150]">
                     {currentDistrictZones.map((z) => (
                       <SelectItem key={z.id} value={String(z.id)} className="text-xs font-mono">
-                        Zone {z.id}: {z.name} ({z.district}, {z.state})
+                        Zone {z.id}: {getLocalizedZoneName(z.id, z.name, t)} ({getLocalizedDistrict(z.district, t)}, {getLocalizedState(z.state, t)})
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -795,7 +796,7 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
                     {t("field_observation.no_zone_registered", "No active monitored risk zone currently registered.")}
                   </span>
                   <span className="text-[0.68rem] text-muted-foreground font-mono">
-                    {selectedDistrict}
+                    {getLocalizedDistrict(selectedDistrict, t)}
                   </span>
                 </div>
               )}
