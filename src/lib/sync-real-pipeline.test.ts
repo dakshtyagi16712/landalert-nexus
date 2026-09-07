@@ -6,7 +6,9 @@ process.env["SUPABASE_SERVICE_ROLE_KEY"] = "sb_secret_test_key_for_testing";
 process.env["MEDIA_UPLOAD_ENABLED"] = "true";
 
 const MOCK_DB_RECORDS: any[] = [];
+const MOCK_LOCALS_ALERTS: any[] = [];
 let mockUpsertError: { message: string } | null = null;
+let nextMockId = 1000;
 
 vi.mock("@/integrations/supabase/client.server", () => {
   return {
@@ -27,7 +29,8 @@ vi.mock("@/integrations/supabase/client.server", () => {
                 // duplicate
                 continue;
               }
-              MOCK_DB_RECORDS.push({ ...r, id: `obs-${Date.now()}-${inserted}` });
+              const dbId = r.id ?? ++nextMockId;
+              MOCK_DB_RECORDS.push({ ...r, id: dbId });
               inserted++;
             }
             return { data: rows, error: null };
@@ -36,10 +39,22 @@ vi.mock("@/integrations/supabase/client.server", () => {
             const rows = Array.isArray(rowOrRows) ? rowOrRows : [rowOrRows];
             let inserted = 0;
             for (const r of rows) {
-              MOCK_DB_RECORDS.push({ ...r, id: `obs-${Date.now()}-${inserted}` });
+              const dbId = r.id ?? ++nextMockId;
+              if (table === "locals_alerts") {
+                MOCK_LOCALS_ALERTS.push({ ...r, id: dbId });
+              } else {
+                MOCK_DB_RECORDS.push({ ...r, id: dbId });
+              }
               inserted++;
             }
-            const mockRow = rows[0] ? { id: `obs-${Date.now()}-0`, dispatched_at: new Date().toISOString(), ...rows[0] } : null;
+            const firstRow = rows[0];
+            const mockRow = firstRow
+              ? {
+                  id: nextMockId,
+                  dispatched_at: new Date().toISOString(),
+                  ...firstRow,
+                }
+              : null;
             const selectChain = {
               maybeSingle: async () => ({ data: mockRow, error: null }),
               single: async () => ({ data: mockRow, error: null }),
@@ -52,9 +67,10 @@ vi.mock("@/integrations/supabase/client.server", () => {
           },
           update: (fields: any) => ({
             in: async (col: string, values: any[]) => {
-              MOCK_DB_RECORDS.filter((item) => values.includes(item[col])).forEach((item) =>
-                Object.assign(item, fields),
-              );
+              const records = table === "locals_alerts" ? MOCK_LOCALS_ALERTS : MOCK_DB_RECORDS;
+              records
+                .filter((item) => values.includes(item[col]) || values.map(String).includes(String(item[col])))
+                .forEach((item) => Object.assign(item, fields));
               return { data: null, error: null };
             },
           }),
@@ -74,22 +90,40 @@ vi.mock("@/integrations/supabase/client.server", () => {
                 }),
               }),
             }),
-            eq: (col: string, val: unknown) => ({
-              maybeSingle: async () => ({ data: null, error: null }),
-              gt: () => ({
-                order: () => ({ data: [], error: null }),
-              }),
-              order: () => ({
-                limit: () => ({
-                  maybeSingle: async () => ({ data: null, error: null }),
+            eq: (col: string, val: unknown) => {
+              const records = table === "locals_alerts" ? MOCK_LOCALS_ALERTS : MOCK_DB_RECORDS;
+              const filtered = records.filter((item) => item[col] === val);
+              return {
+                maybeSingle: async () => ({ data: filtered[0] ?? null, error: null }),
+                single: async () => ({ data: filtered[0] ?? null, error: null }),
+                gt: () => ({
+                  order: () => ({ data: [], error: null }),
                 }),
-              }),
-            }),
-            order: () => ({
-              limit: async () => ({ data: [], error: null }),
-            }),
+                order: (orderCol?: string, opts?: any) => {
+                  const res = { data: filtered, error: null };
+                  return {
+                    ...res,
+                    then: (resolve: any) => resolve(res),
+                    limit: () => ({
+                      maybeSingle: async () => ({ data: filtered[0] ?? null, error: null }),
+                      single: async () => ({ data: filtered[0] ?? null, error: null }),
+                      then: (resolve: any) => resolve(res),
+                    }),
+                  };
+                },
+              };
+            },
+            order: (orderCol?: string, opts?: any) => {
+              const records = table === "locals_alerts" ? MOCK_LOCALS_ALERTS : MOCK_DB_RECORDS;
+              const res = { data: records, error: null };
+              return {
+                ...res,
+                then: (resolve: any) => resolve(res),
+                limit: async () => ({ data: [], error: null }),
+              };
+            },
             in: async (col: string, values: string[]) => ({
-              data: MOCK_DB_RECORDS.filter((item) => values.includes(item[col])),
+              data: MOCK_DB_RECORDS.filter((item) => values.includes(item[col]) || values.map(String).includes(String(item[col]))),
               error: null,
             }),
           }),
@@ -127,6 +161,10 @@ import {
   getAllOfflineMediaIds,
 } from "./offline-media-store";
 import { getDatabaseUrl, isProductionEnvironment } from "./db.server";
+import {
+  getInMemoryLocalsAlerts,
+  resetLocalsAlertStoreForTesting,
+} from "./locals-escalation.service";
 
 describe("Authoritative End-to-End Real Sync, Media, and DB Schema Pipeline Tests", () => {
   const store = new Map<string, string>();
@@ -135,6 +173,9 @@ describe("Authoritative End-to-End Real Sync, Media, and DB Schema Pipeline Test
   beforeEach(() => {
     store.clear();
     MOCK_DB_RECORDS.length = 0;
+    MOCK_LOCALS_ALERTS.length = 0;
+    nextMockId = 1000;
+    resetLocalsAlertStoreForTesting();
     vi.stubGlobal("localStorage", {
       getItem: (key: string) => store.get(key) ?? null,
       setItem: (key: string, val: string) => store.set(key, val),
@@ -595,6 +636,166 @@ describe("Authoritative End-to-End Real Sync, Media, and DB Schema Pipeline Test
     expect(res.syncedCount).toBe(1);
     expect(upsertAttempts).toBeGreaterThanOrEqual(1);
     mockUpsertError = null;
+  });
+
+  // 26: True end-to-end pipeline: 10 separate sequential sync calls trigger LOCALS alert and escalate rows to ACTIONABLE
+  it("26: 10 sequential sync calls trigger a LOCALS alert and escalate all DB rows to ACTIONABLE", async () => {
+    const baseTime = Date.now();
+    const zoneId = 3;
+    const baseLat = 25.5788;
+    const baseLng = 91.8933;
+
+    // 10 separate sequential syncFieldObservations calls (one observation per call, not one batch)
+    for (let i = 0; i < 10; i++) {
+      const obsInput: FieldObservationInput = {
+        zone_id: zoneId,
+        observed_at: new Date(baseTime + i * 60000).toISOString(),
+        client_timestamp: new Date(baseTime + i * 60000).toISOString(),
+        rainfall_mm: 55.0,
+        visual_signs: "Slope Movement observed on steep bank",
+        road_status: "open",
+        observer_id: `field_citizen_${i + 1}`,
+        idempotency_key: `E2E-LOCALS-SEQ-10-${i}-${baseTime}`,
+        submitter_role: "PUBLIC_USER",
+        geo_lat: baseLat + (i * 0.0001), // within 10-100m (< 500m)
+        geo_lng: baseLng + (i * 0.0001),
+        geo_accuracy_m: 4.5,
+        consent_given: true,
+      };
+
+      const syncRes = await syncFieldObservations([obsInput]);
+      expect(syncRes.success).toBe(true);
+      expect(syncRes.syncedCount).toBe(1);
+    }
+
+    // 1. A LOCALS alert was created
+    const alerts = getInMemoryLocalsAlerts();
+    expect(alerts.length).toBe(1);
+    const alert = alerts[0];
+    expect(alert).toBeDefined();
+    expect(alert.status).toBe("ACTIVE");
+    expect(alert.observation_count).toBe(10);
+    expect(alert.report_type).toBe("slope_movement");
+    expect(alert.detection_method).toBe("gps_proximity");
+
+    // Also verify mock locals_alerts table persistence
+    expect(MOCK_LOCALS_ALERTS.length).toBeGreaterThanOrEqual(1);
+
+    // 2. All 10 corresponding rows in MOCK_DB_RECORDS have status === "ACTIONABLE"
+    expect(MOCK_DB_RECORDS).toHaveLength(10);
+    for (const record of MOCK_DB_RECORDS) {
+      expect(record.status).toBe("ACTIONABLE");
+    }
+
+    // 3. The alert's triggering_observation_ids contains all 10 real DB ids assigned during upsert
+    const realDbIds = MOCK_DB_RECORDS.map((r) => r.id);
+    expect(alert.triggering_observation_ids).toHaveLength(10);
+    expect(alert.triggering_observation_ids.slice().sort((a, b) => a - b)).toEqual(
+      realDbIds.slice().sort((a, b) => a - b),
+    );
+  });
+
+  // 27: Negative boundary: 9 sequential sync calls do NOT trigger an alert (status remains PENDING_VERIFICATION)
+  it("27: Negative boundary: 9 sequential sync calls do NOT trigger LOCALS alert (status remains PENDING_VERIFICATION)", async () => {
+    const baseTime = Date.now();
+    const zoneId = 3;
+    const baseLat = 25.5788;
+    const baseLng = 91.8933;
+
+    // 9 separate sequential syncFieldObservations calls (one observation per call)
+    for (let i = 0; i < 9; i++) {
+      const obsInput: FieldObservationInput = {
+        zone_id: zoneId,
+        observed_at: new Date(baseTime + i * 60000).toISOString(),
+        client_timestamp: new Date(baseTime + i * 60000).toISOString(),
+        rainfall_mm: 55.0,
+        visual_signs: "Slope Movement observed on steep bank",
+        road_status: "open",
+        observer_id: `field_citizen_sub9_${i + 1}`,
+        idempotency_key: `E2E-LOCALS-SEQ-9-${i}-${baseTime}`,
+        submitter_role: "PUBLIC_USER",
+        geo_lat: baseLat + (i * 0.0001),
+        geo_lng: baseLng + (i * 0.0001),
+        geo_accuracy_m: 4.5,
+        consent_given: true,
+      };
+
+      const syncRes = await syncFieldObservations([obsInput]);
+      expect(syncRes.success).toBe(true);
+      expect(syncRes.syncedCount).toBe(1);
+    }
+
+    // 1. Assert NO LOCALS alert was created
+    const alerts = getInMemoryLocalsAlerts();
+    expect(alerts.length).toBe(0);
+    expect(MOCK_LOCALS_ALERTS.length).toBe(0);
+
+    // 2. All 9 rows in MOCK_DB_RECORDS remain PENDING_VERIFICATION
+    expect(MOCK_DB_RECORDS).toHaveLength(9);
+    for (const record of MOCK_DB_RECORDS) {
+      expect(record.status).toBe("PENDING_VERIFICATION");
+    }
+  });
+
+  // 28: Authenticated manual re-evaluation trigger: /api/locals/check handles authorized official calls
+  it("28: /api/locals/check can be triggered manually on-demand with official Bearer token and creates qualifying alerts", async () => {
+    const baseTime = Date.now();
+    const zoneId = 5;
+    const baseLat = 26.14;
+    const baseLng = 91.73;
+
+    // Pre-populate 10 pending observations in the DB pool (e.g. synced before auto-escalation or without triggering)
+    for (let i = 0; i < 10; i++) {
+      MOCK_DB_RECORDS.push({
+        id: 7000 + i,
+        zone_id: zoneId,
+        observed_at: new Date(baseTime - (i + 1) * 60000).toISOString(), // within last hour
+        client_timestamp: new Date(baseTime - (i + 1) * 60000).toISOString(),
+        rainfall_mm: 60.0,
+        visual_signs: "Slope Movement observed on slope cut",
+        report_type: "slope_movement",
+        road_status: "restricted",
+        observer_id: `manual_ops_observer_${i + 1}`,
+        idempotency_key: `MANUAL-OPS-CHECK-${i}-${baseTime}`,
+        status: "PENDING_VERIFICATION",
+        review_status: "PENDING_REVIEW",
+        source: "PUBLIC_REPORT",
+        geo_lat: baseLat + (i * 0.0001),
+        geo_lng: baseLng + (i * 0.0001),
+        geo_accuracy_m: 5.0,
+        consent_given: true,
+      });
+    }
+
+    // A. Reject unauthorized calls (no Authorization header)
+    const unauthReq = new Request("http://localhost:3000/api/locals/check", {
+      method: "POST",
+    });
+    const unauthRes = await handleApiRequest(unauthReq);
+    expect(unauthRes?.status).toBe(401);
+
+    // B. Manual on-demand re-evaluation by authorized official
+    const authReq = new Request("http://localhost:3000/api/locals/check", {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer test-authenticated-official",
+        "Content-Type": "application/json",
+      },
+    });
+    const authRes = await handleApiRequest(authReq);
+    expect(authRes?.status).toBe(200);
+
+    const body = await authRes?.json();
+    expect(body.ok).toBe(true);
+    expect(body.created_count).toBe(1);
+    expect(body.created_alerts).toHaveLength(1);
+    expect(body.created_alerts[0].observation_count).toBe(10);
+    expect(body.created_alerts[0].report_type).toBe("slope_movement");
+
+    // All 10 rows in MOCK_DB_RECORDS escalated to ACTIONABLE
+    const matchingRecords = MOCK_DB_RECORDS.filter((r) => r.id >= 7000 && r.id < 7010);
+    expect(matchingRecords).toHaveLength(10);
+    expect(matchingRecords.every((r) => r.status === "ACTIONABLE")).toBe(true);
   });
 });
 
