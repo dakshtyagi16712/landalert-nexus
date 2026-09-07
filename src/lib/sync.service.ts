@@ -23,6 +23,8 @@ export interface FieldObservationInput {
   road_status?: ("open" | "restricted" | "blocked" | "unknown") | undefined;
   observer_id?: string | undefined;
   idempotency_key?: string | undefined;
+  notes?: string | undefined;
+  description?: string | undefined;
   // Geo-tagged Media & Sensor Coordinates (Task 2)
   media_urls?: string[] | undefined;
   media_metadata?:
@@ -133,6 +135,7 @@ export async function syncFieldObservations(records: FieldObservationInput[]): P
     rainfall_mm: number | null;
     soil_condition: string | null;
     visual_signs: string | null;
+    notes?: string | null;
     road_status: "open" | "restricted" | "blocked" | "unknown" | null;
     observer_id: string;
     idempotency_key: string;
@@ -186,8 +189,9 @@ export async function syncFieldObservations(records: FieldObservationInput[]): P
     const hasSoil = Boolean(r.soil_condition && r.soil_condition.trim() !== "");
     const hasMedia = Boolean(r.media_urls && r.media_urls.length > 0);
     const hasGeo = r.geo_lat !== undefined && r.geo_lat !== null;
+    const hasNotes = Boolean((r.notes && r.notes.trim() !== "") || (r.description && r.description.trim() !== ""));
 
-    if (!hasRainfall && !hasVisualSigns && !hasRoadStatus && !hasSoil && !hasMedia && !hasGeo) {
+    if (!hasRainfall && !hasVisualSigns && !hasRoadStatus && !hasSoil && !hasMedia && !hasGeo && !hasNotes) {
       errors.push(`Record ${i}: empty observation, at least one observational measurement or signal is required`);
       continue;
     }
@@ -225,6 +229,7 @@ export async function syncFieldObservations(records: FieldObservationInput[]): P
       rainfall_mm: rainfall,
       soil_condition: r.soil_condition ?? null,
       visual_signs: r.visual_signs ?? null,
+      notes: r.notes ?? r.description ?? null,
       road_status: r.road_status ?? null,
       observer_id: r.observer_id.trim(),
       idempotency_key: key,

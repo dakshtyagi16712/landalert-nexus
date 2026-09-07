@@ -25,6 +25,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { getUserAuthorizationState } from "@/lib/auth-domains";
 import { Camera, Video, Upload } from "lucide-react";
 import { ObservationCameraModal } from "@/components/ObservationCameraModal";
+import { VoiceTranslateTextarea } from "@/components/VoiceTranslateTextarea";
 import { useUserLocation } from "@/hooks/useUserLocation";
 import { useTranslation } from "react-i18next";
 import { getLocalizedZoneName, getLocalizedDistrict, getLocalizedState } from "@/lib/geo-translations";
@@ -226,6 +227,7 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
   const [visualSigns, setVisualSigns] = useState<string>("None");
   const [roadStatus, setRoadStatus] = useState<"open" | "restricted" | "blocked" | "unknown">("open");
   const [observerId, setObserverId] = useState<string>("citizen_observer");
+  const [fieldNotes, setFieldNotes] = useState<string>("");
 
   // 3. Geolocation Capture (Shared useUserLocation Hook)
   const {
@@ -423,9 +425,10 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
     const hasSoil = Boolean(soilCondition);
     const hasMedia = mediaList.length > 0;
     const hasGeo = geoLat !== null;
+    const hasNotes = fieldNotes.trim().length > 0;
 
-    if (!hasRain && !hasSigns && !hasRoad && !hasSoil && !hasMedia && !hasGeo) {
-      newErrors.general = t("field_observation.error_empty", "Empty observation: At least one field observation signal (rainfall mm, soil condition, slope signs, road status, ground photo, or GPS reading) must be provided.");
+    if (!hasRain && !hasSigns && !hasRoad && !hasSoil && !hasMedia && !hasGeo && !hasNotes) {
+      newErrors.general = t("field_observation.error_empty", "Empty observation: At least one field observation signal (rainfall mm, soil condition, slope signs, road status, field notes, ground photo, or GPS reading) must be provided.");
     }
 
     if (Object.keys(newErrors).length > 0) {
@@ -553,7 +556,14 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
       observed_at: new Date().toISOString(),
       rainfall_mm: rainfallMm ? Number(rainfallMm) : undefined,
       soil_condition: soilCondition,
-      visual_signs: visualSigns === "None" ? undefined : visualSigns,
+      visual_signs:
+        visualSigns !== "None"
+          ? fieldNotes.trim()
+            ? `${visualSigns} — ${fieldNotes.trim()}`
+            : visualSigns
+          : fieldNotes.trim() || undefined,
+      notes: fieldNotes.trim() || undefined,
+      description: fieldNotes.trim() || undefined,
       road_status: roadStatus,
       observer_id: observerId.trim() || "citizen_observer",
       media_urls: uploadedUrls.filter((u) => !u.startsWith("data:") && !u.startsWith("offline_")),
@@ -895,7 +905,14 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
             </div>
           </div>
 
-          {/* 3. Geo-Tagged Media Upload (Photos/Videos) - Guaranteed Always Visible */}
+          {/* 3. Field Notes & Voice Audio Typing with Real-Time Translation */}
+          <VoiceTranslateTextarea
+            value={fieldNotes}
+            onChange={setFieldNotes}
+            disabled={submitting}
+          />
+
+          {/* 4. Geo-Tagged Media Upload (Photos/Videos) - Guaranteed Always Visible */}
           <div className="rounded border border-border bg-secondary/20 p-3 space-y-2">
             <div className="flex items-center justify-between">
               <Label htmlFor="fieldMediaUploadInput" className="text-xs font-mono uppercase text-muted-foreground flex items-center gap-2">

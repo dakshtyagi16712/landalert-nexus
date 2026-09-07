@@ -205,6 +205,59 @@ export async function handleApiRequest(request: Request): Promise<Response | nul
       return jsonResponse({ ok: true, timestamp: new Date().toISOString() }, 200, cors);
     }
 
+    // Real-Time Language Translation Proxy (Auto-translates spoken/typed text to English)
+    if (pathname === "/api/translate" && request.method === "POST") {
+      try {
+        const body = await request.json();
+        const text = body?.text ? String(body.text).trim() : "";
+        if (!text) {
+          return jsonResponse(
+            { success: true, originalText: "", translatedText: "", detectedLang: "en" },
+            200,
+            cors
+          );
+        }
+
+        const sourceLang = body.sourceLang || "auto";
+        const targetLang = body.targetLang || "en";
+        const gtxUrl = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${encodeURIComponent(
+          sourceLang
+        )}&tl=${encodeURIComponent(targetLang)}&dt=t&q=${encodeURIComponent(text)}`;
+
+        const upstreamRes = await fetch(gtxUrl);
+        if (!upstreamRes.ok) {
+          return jsonResponse(
+            { success: false, originalText: text, translatedText: text, error: "Upstream translation error" },
+            200,
+            cors
+          );
+        }
+
+        const gtxData = await upstreamRes.json();
+        let translated = "";
+        if (Array.isArray(gtxData[0])) {
+          translated = gtxData[0]
+            .map((chunk: any) => chunk[0])
+            .filter(Boolean)
+            .join("");
+        }
+
+        return jsonResponse(
+          {
+            success: true,
+            originalText: text,
+            translatedText: translated || text,
+            detectedLang: gtxData[2] || sourceLang,
+            targetLang,
+          },
+          200,
+          cors
+        );
+      } catch (err: any) {
+        return jsonResponse({ success: false, error: err?.message || "Translation failed" }, 500, cors);
+      }
+    }
+
     // 6. Alert Dispatch Service (Explicit Dispatcher Authorization Required)
     if (pathname === "/api/alerts/dispatch" && request.method === "POST") {
       const clientKey = `alert_dispatch:${getClientIdentifier(request)}`;
