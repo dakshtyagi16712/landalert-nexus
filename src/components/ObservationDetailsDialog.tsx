@@ -53,6 +53,156 @@ interface Props {
   accessToken?: string | null;
 }
 
+function AutoResolvingMediaItem({
+  item,
+  resolvedOfflineUrls,
+  onResolve,
+}: {
+  item: {
+    key: string;
+    url?: string;
+    name?: string;
+    size?: number;
+    mimeType?: string;
+    isOffline?: boolean;
+  };
+  resolvedOfflineUrls: Record<string, string>;
+  onResolve: (key: string, url: string) => void;
+}) {
+  const [localBlobUrl, setLocalBlobUrl] = useState<string | null>(item.url || null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (item.url) {
+      setLocalBlobUrl(item.url);
+      return;
+    }
+    const resolved =
+      resolvedOfflineUrls[item.key] ||
+      (item.name ? resolvedOfflineUrls[item.name] : undefined);
+    if (resolved) {
+      setLocalBlobUrl(resolved);
+      return;
+    }
+
+    let isMounted = true;
+    setLoading(true);
+    const targetKey = item.key || item.name;
+    if (targetKey) {
+      (async () => {
+        try {
+          const stored =
+            (await getOfflineMedia(targetKey)) ||
+            (item.name ? await getOfflineMediaByName(item.name) : null);
+          if (stored && stored.blob && isMounted) {
+            const u = URL.createObjectURL(stored.blob);
+            setLocalBlobUrl(u);
+            onResolve(targetKey, u);
+          }
+        } catch {
+          // ignore
+        } finally {
+          if (isMounted) setLoading(false);
+        }
+      })();
+    }
+    return () => {
+      isMounted = false;
+    };
+  }, [item.url, item.key, item.name, resolvedOfflineUrls]);
+
+  const isAudio =
+    item.mimeType?.startsWith("audio/") ||
+    item.name?.endsWith(".mp3") ||
+    item.name?.endsWith(".wav") ||
+    item.name?.endsWith(".ogg") ||
+    item.name?.endsWith(".m4a") ||
+    item.name?.includes("voice_memo") ||
+    (item.name?.endsWith(".webm") && !item.mimeType?.includes("video"));
+
+  const isVideo =
+    !isAudio &&
+    (item.mimeType?.startsWith("video/") ||
+      item.name?.endsWith(".mp4") ||
+      item.name?.endsWith(".mov") ||
+      (item.name?.endsWith(".webm") && Boolean(item.mimeType?.startsWith("video/"))));
+
+  const isImg = !isAudio && !isVideo;
+  const currentUrl = localBlobUrl || item.url;
+
+  if (currentUrl) {
+    if (isAudio) {
+      return (
+        <div className="rounded border border-border bg-secondary/30 p-2.5 flex flex-col gap-2">
+          <div className="flex items-center gap-2 text-xs font-semibold text-foreground">
+            <Volume2 className="h-4 w-4 text-primary shrink-0" />
+            <span className="truncate">{item.name || "Audio Recording"}</span>
+          </div>
+          <audio src={currentUrl} controls className="w-full h-8" />
+        </div>
+      );
+    }
+
+    if (isVideo) {
+      return (
+        <div className="rounded border border-border bg-black/40 overflow-hidden">
+          <video src={currentUrl} controls className="h-36 w-full object-contain" />
+          <div className="p-1.5 text-[0.65rem] text-muted-foreground truncate">{item.name}</div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="rounded border border-border overflow-hidden bg-secondary/10 flex flex-col">
+        <a
+          href={currentUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="block overflow-hidden group hover:opacity-90 cursor-pointer"
+        >
+          <img
+            src={currentUrl}
+            alt={item.name}
+            className="h-44 w-full object-cover group-hover:scale-102 transition-transform"
+          />
+        </a>
+        <div className="p-1.5 text-[0.65rem] text-muted-foreground truncate font-mono flex items-center justify-between">
+          <span className="truncate">{item.name}</span>
+          {item.size && <span>{(item.size / 1024 / 1024).toFixed(2)} MB</span>}
+        </div>
+      </div>
+    );
+  }
+
+  // Fallback while resolving or if local blob not yet in memory
+  if (isImg) {
+    return (
+      <div className="rounded border border-border/80 bg-secondary/20 p-4 flex flex-col items-center justify-center gap-2 h-44 text-center">
+        <ImageIcon className="h-8 w-8 text-primary/60 animate-pulse" />
+        <div className="text-xs font-medium text-foreground truncate max-w-[200px]">{item.name}</div>
+        <div className="text-[0.65rem] text-muted-foreground font-mono">
+          {loading ? "Loading photo..." : "Field Evidence Photo"}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded border border-border/80 bg-secondary/30 p-2.5 flex items-center gap-2.5">
+      <div className="p-2 rounded bg-primary/10 text-primary shrink-0">
+        {isAudio ? <Volume2 className="h-4 w-4" /> : <VideoIcon className="h-4 w-4" />}
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="text-xs font-semibold text-foreground truncate">{item.name}</div>
+        <div className="text-[0.65rem] text-muted-foreground flex items-center gap-1.5 mt-0.5">
+          <span>{item.size ? `${(item.size / 1024 / 1024).toFixed(2)} MB` : "Field File"}</span>
+          <span className="text-primary font-medium">• {isAudio ? "Offline Audio" : "Offline Video"}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function ObservationDetailsDialog({
   observations,
   zones,
@@ -523,117 +673,14 @@ export function ObservationDetailsDialog({
                       {t("observations.evidence_photos", "Attached Evidence Photos & Media")} ({items.length})
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                      {items.map((item) => {
-                        const isAudio =
-                          item.mimeType?.startsWith("audio/") ||
-                          item.name?.endsWith(".mp3") ||
-                          item.name?.endsWith(".wav") ||
-                          item.name?.endsWith(".ogg") ||
-                          item.name?.endsWith(".m4a") ||
-                          item.name?.includes("voice_memo") ||
-                          (item.name?.endsWith(".webm") && !item.mimeType?.includes("video"));
-
-                        const isVideo =
-                          !isAudio &&
-                          (item.mimeType?.startsWith("video/") ||
-                            item.name?.endsWith(".mp4") ||
-                            item.name?.endsWith(".mov") ||
-                            (item.name?.endsWith(".webm") && Boolean(item.mimeType?.startsWith("video/"))));
-
-                        const isImg = !isAudio && !isVideo;
-
-                        if (item.url) {
-                          if (isAudio) {
-                            return (
-                              <div key={item.key} className="rounded border border-border bg-secondary/30 p-2.5 flex flex-col gap-2">
-                                <div className="flex items-center gap-2 text-xs font-semibold text-foreground">
-                                  <Volume2 className="h-4 w-4 text-primary shrink-0" />
-                                  <span className="truncate">{item.name || "Audio Recording"}</span>
-                                </div>
-                                <audio src={item.url} controls className="w-full h-8" />
-                              </div>
-                            );
-                          }
-
-                          if (isVideo) {
-                            return (
-                              <div key={item.key} className="rounded border border-border bg-black/40 overflow-hidden">
-                                <video src={item.url} controls className="h-32 w-full object-contain" />
-                                <div className="p-1.5 text-[0.65rem] text-muted-foreground truncate">{item.name}</div>
-                              </div>
-                            );
-                          }
-
-                          return (
-                            <a
-                              key={item.key}
-                              href={item.url}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="block rounded border border-border overflow-hidden group hover:opacity-90 bg-secondary/10"
-                            >
-                              <img
-                                src={item.url}
-                                alt={item.name}
-                                className="h-36 w-full object-cover group-hover:scale-102 transition-transform"
-                                onError={(e) => {
-                                  // Fallback gracefully on image load error
-                                  (e.target as HTMLElement).style.display = "none";
-                                }}
-                              />
-                              <div className="p-1.5 text-[0.65rem] text-muted-foreground truncate font-mono">
-                                {item.name}
-                              </div>
-                            </a>
-                          );
-                        }
-
-                        // Staged offline evidence card
-                        return (
-                          <div
-                            key={item.key}
-                            className="rounded border border-border/80 bg-secondary/30 p-2.5 flex flex-col gap-2"
-                          >
-                            <div className="flex items-center gap-2.5">
-                              <div className="p-2 rounded bg-primary/10 text-primary shrink-0">
-                                {isAudio ? <Volume2 className="h-4 w-4" /> : isVideo ? <VideoIcon className="h-4 w-4" /> : <ImageIcon className="h-4 w-4" />}
-                              </div>
-                              <div className="min-w-0 flex-1">
-                                <div className="text-xs font-semibold text-foreground truncate">{item.name}</div>
-                                <div className="text-[0.65rem] text-muted-foreground flex items-center gap-1.5 mt-0.5">
-                                  <span>{item.size ? `${(item.size / 1024 / 1024).toFixed(2)} MB` : "Field File"}</span>
-                                  <span className="text-primary font-medium">
-                                    • {isAudio ? "Offline Audio" : isVideo ? "Offline Video" : "Offline Photo"}
-                                  </span>
-                                </div>
-                              </div>
-                            </div>
-
-                            {/* Action to view / load offline media */}
-                            <button
-                              type="button"
-                              onClick={async () => {
-                                const targetId = item.key || item.name;
-                                if (targetId) {
-                                  const stored = (await getOfflineMedia(targetId)) || (item.name ? await getOfflineMediaByName(item.name) : null);
-                                  if (stored && stored.blob) {
-                                    const u = URL.createObjectURL(stored.blob);
-                                    setResolvedOfflineUrls((prev) => ({
-                                      ...prev,
-                                      [targetId]: u,
-                                      ...(item.name ? { [item.name]: u } : {}),
-                                    }));
-                                  }
-                                }
-                              }}
-                              className="py-1 px-2 text-[0.65rem] font-mono text-primary bg-primary/10 hover:bg-primary/20 rounded border border-primary/20 flex items-center justify-center gap-1 cursor-pointer transition-colors"
-                            >
-                              <Eye className="h-3 w-3" />
-                              <span>{isImg ? "View Cached Photo" : isVideo ? "Play Cached Video" : "Listen to Cached Audio"}</span>
-                            </button>
-                          </div>
-                        );
-                      })}
+                      {items.map((item) => (
+                        <AutoResolvingMediaItem
+                          key={item.key}
+                          item={item}
+                          resolvedOfflineUrls={resolvedOfflineUrls}
+                          onResolve={(k, u) => setResolvedOfflineUrls((prev) => ({ ...prev, [k]: u }))}
+                        />
+                      ))}
                     </div>
                   </div>
                 );

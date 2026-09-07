@@ -10,7 +10,7 @@
  * 5. Strict offline data semantics: NO fabricated weather, ML, or alerts
  */
 
-const CACHE_NAME = "landalert-pwa-vb0f9be46fb";
+const CACHE_NAME = "landalert-pwa-v0d018ddf51";
 const MAP_CACHE = "landalert-tiles-v1";
 const DATA_CACHE = "landalert-data-v1";
 
@@ -25,7 +25,7 @@ const PRECACHE_ASSETS = [
   "/assets/RiskMap-CHKJ_wKy.js",
   "/assets/RiskMap-vh-t_kPv.css",
   "/assets/alerts-Ck1W6N8N.js",
-  "/assets/alerts-DyNfmyRQ.js",
+  "/assets/alerts-pPKDQ3Gx.js",
   "/assets/atkinson-hyperlegible-latin-400-normal-BbWidj28.woff",
   "/assets/atkinson-hyperlegible-latin-400-normal-BrHNak5F.woff2",
   "/assets/atkinson-hyperlegible-latin-ext-400-normal-Bbz-b3yf.woff",
@@ -35,7 +35,7 @@ const PRECACHE_ASSETS = [
   "/assets/clock-f55agLnh.js",
   "/assets/dist-Btb5Jv1E.js",
   "/assets/geo-translations-B89rMh4-.js",
-  "/assets/index-C6at61TB.js",
+  "/assets/index-C7TikrD5.js",
   "/assets/lock--2AxhOJb.js",
   "/assets/observations-Ck1W6N8N.js",
   "/assets/offline-media-store-CPS0kK6b.js",
@@ -44,13 +44,13 @@ const PRECACHE_ASSETS = [
   "/assets/rolldown-runtime-B0Z9INg1.js",
   "/assets/route-Z0tX_F9o.js",
   "/assets/routes-Ck1W6N8N.js",
-  "/assets/routes-DGsFIyTQ.js",
-  "/assets/styles-CBymq2r-.css",
+  "/assets/routes-DV5dNx2H.js",
+  "/assets/styles-Vb7AMJQ1.css",
   "/assets/textarea-DSDrL2X-.js",
   "/assets/transformers-BGTKhuSD.js",
   "/assets/web-Dqf9dW0a.js",
-  "/assets/zones._id-COVnd8J5.js",
   "/assets/zones._id-Ck1W6N8N.js",
+  "/assets/zones._id-DS-iK9Hi.js",
   "/emblem-of-india.svg",
   "/favicon.ico",
   "/favicon.svg",
