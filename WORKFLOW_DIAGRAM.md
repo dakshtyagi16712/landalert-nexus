@@ -5,7 +5,61 @@
 
 ---
 
-## 1. High-Level Master End-to-End Workflow
+## 1. Complete Project Workflow (High-Level Overview)
+
+A clear, end-to-end representation of how the entire LandAlert-Nexus platform operates from data ingestion to emergency action:
+
+```mermaid
+flowchart LR
+    %% High-level styling
+    classDef source fill:#1e3a8a,stroke:#3b82f6,stroke-width:2px,color:#fff;
+    classDef engine fill:#065f46,stroke:#10b981,stroke-width:2px,color:#fff;
+    classDef storage fill:#4c1d95,stroke:#8b5cf6,stroke-width:2px,color:#fff;
+    classDef portal fill:#78350f,stroke:#f59e0b,stroke-width:2px,color:#fff;
+    classDef response fill:#7f1d1d,stroke:#ef4444,stroke-width:2px,color:#fff;
+
+    subgraph S1["1. Data Ingestion"]
+        A1["🛰️ Satellite Radar & Optical<br/>(Sentinel-1 / Sentinel-2)"]:::source
+        A2["🌧️ Weather & Soil Moisture<br/>(Open-Meteo & ERA5)"]:::source
+        A3["📱 Ground Field Reports<br/>(Citizen & Officer PWA)"]:::source
+    end
+
+    subgraph S2["2. Risk & AI Engine"]
+        B1["Radar InSAR Ground Velocity"]:::engine
+        B2["Hydrological Rainfall Thresholds"]:::engine
+        B3["Machine Learning Hazard Scoring"]:::engine
+    end
+
+    subgraph S3["3. Central Database"]
+        C1[("Supabase PostgreSQL<br/>• Realtime Risk Status<br/>• Spatial Zones<br/>• Incident Reports")]:::storage
+    end
+
+    subgraph S4["4. Web Command Center"]
+        D1["Interactive GIS Map"]:::portal
+        D2["9 Regional Languages & Offline PWA"]:::portal
+        D3["Officer Review & Verification Console"]:::portal
+    end
+
+    subgraph S5["5. Emergency Response"]
+        E1["🚨 TRAI DLT Emergency SMS Alerts"]:::response
+        E2["🚒 NDRF / SDRF Team Dispatch"]:::response
+        E3["📢 Public Advisory & Evacuation Warning"]:::response
+    end
+
+    %% Data Flow
+    A1 --> B1
+    A2 --> B2
+    B1 & B2 --> B3
+    B3 --> C1
+    A3 --> C1
+
+    C1 <--> S4
+    S4 --> S5
+```
+
+---
+
+## 2. Detailed Architectural Component Flowchart
 
 ```mermaid
 flowchart TD
