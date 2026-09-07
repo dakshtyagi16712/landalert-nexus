@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import {
   Dialog,
   DialogContent,
@@ -387,9 +387,31 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
     }
   }
 
-  function removeMedia(idx: number) {
+  const handleRemoveMedia = (idx: number) => {
     setMediaList((prev) => prev.filter((_, i) => i !== idx));
-  }
+  };
+
+  // Handle voice audio recordings — attach to report media list
+  const handleVoiceRecorded = useCallback(
+    (blob: Blob, mediaId: string) => {
+      if (mediaList.length >= 3) return; // respect max-3 cap
+      const ext = blob.type.includes("mp4") ? "mp4" : "webm";
+      const filename = `${mediaId}.${ext}`;
+      const file = new File([blob], filename, { type: blob.type || "audio/webm" });
+      const previewUrl = URL.createObjectURL(blob);
+      setMediaList((prev) => [
+        ...prev,
+        {
+          file,
+          previewUrl,
+          name: filename,
+          size: blob.size,
+          mimeType: blob.type || "audio/webm",
+        },
+      ]);
+    },
+    [mediaList.length],
+  );
 
   const [submitting, setSubmitting] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{
@@ -912,6 +934,7 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
             value={fieldNotes}
             onChange={setFieldNotes}
             disabled={submitting}
+            onAudioRecorded={handleVoiceRecorded}
           />
 
           {/* 4. Geo-Tagged Media Upload (Photos/Videos) - Guaranteed Always Visible */}
@@ -1052,7 +1075,7 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
                       <button
                         type="button"
                         aria-label={`Remove media ${item.name}`}
-                        onClick={() => removeMedia(idx)}
+                        onClick={() => handleRemoveMedia(idx)}
                         className="text-muted-foreground hover:text-destructive text-sm font-bold ml-auto px-1 cursor-pointer"
                         title="Remove"
                       >

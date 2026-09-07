@@ -66,6 +66,8 @@ export function VoiceTranslateTextarea({
 
   const isListeningRef = useRef<boolean>(false);
   const valueRef = useRef<string>(value);
+  // Tracks whether SpeechRecognition produced any transcription this session
+  const hasTranscribedRef = useRef<boolean>(false);
 
   useEffect(() => {
     valueRef.current = value;
@@ -92,6 +94,7 @@ export function VoiceTranslateTextarea({
   const handleTranslateAndAppend = useCallback(
     async (spokenText: string) => {
       if (!spokenText.trim()) return;
+      hasTranscribedRef.current = true;
       setIsTranslating(true);
       const langCode = getEffectiveSpeechLang();
       const res = await translateToEnglish(spokenText, langCode.split("-")[0]);
@@ -206,6 +209,7 @@ export function VoiceTranslateTextarea({
 
     audioStreamRef.current = stream;
     audioChunksRef.current = [];
+    hasTranscribedRef.current = false; // reset for this session
 
     const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
       ? "audio/webm;codecs=opus"
@@ -248,11 +252,15 @@ export function VoiceTranslateTextarea({
           size: recordedBlob.size,
         });
 
-        const current = (valueRef.current || "").trim();
-        const voiceTag = `[🎙️ Voice note (${durationSecs}s) — Stored offline]`;
-        const updated = current ? `${current} ${voiceTag}` : voiceTag;
-        valueRef.current = updated;
-        onChange(updated);
+        // Only append voice tag if SpeechRecognition did NOT produce any transcription
+        // (i.e. offline, or Speech API was blocked/unavailable)
+        if (!hasTranscribedRef.current) {
+          const current = (valueRef.current || "").trim();
+          const voiceTag = `[🎙️ Voice note (${durationSecs}s) — Stored offline]`;
+          const updated = current ? `${current} ${voiceTag}` : voiceTag;
+          valueRef.current = updated;
+          onChange(updated);
+        }
 
         setTranslationNotice(`✓ Voice recording (${durationSecs}s) saved`);
         setTimeout(() => setTranslationNotice(null), 5000);
