@@ -582,10 +582,8 @@ export function FieldObservationDialog({ initialZoneId, trigger, onSuccess }: Pr
       soil_condition: soilCondition,
       visual_signs:
         visualSigns !== "None"
-          ? fieldNotes.trim()
-            ? `${visualSigns} — ${fieldNotes.trim()}`
-            : visualSigns
-          : fieldNotes.trim() || undefined,
+          ? visualSigns
+          : (fieldNotes.trim() ? "Observed Ground Distress" : undefined),
       notes: fieldNotes.trim() || undefined,
       description: fieldNotes.trim() || undefined,
       road_status: roadStatus,

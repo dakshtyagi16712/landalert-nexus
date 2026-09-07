@@ -384,45 +384,82 @@ export function ObservationDetailsDialog({
             </div>
 
             {/* Observation Findings */}
-            <div className="rounded border border-border bg-card p-4 space-y-3 shadow-xs">
-              <h4 className="text-xs font-bold font-display uppercase tracking-wider text-muted-foreground">
-                {t("observations.findings_title", "Ground Conditions & Visual Signs")}
-              </h4>
+            {(() => {
+              const rawSigns = activeObs.visual_signs || "";
+              let displaySigns = rawSigns;
+              let displayNotes = (activeObs as any)?.notes || (activeObs as any)?.description || "";
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div className="rounded border border-border/80 bg-secondary/30 p-2.5">
-                  <div className="text-[0.68rem] text-muted-foreground uppercase">{t("observations.visual_signs", "Visual Signs")}</div>
-                  <div className="font-semibold text-xs text-foreground mt-0.5">
-                    {activeObs.visual_signs || "Slope movement / ground distress"}
+              if (rawSigns.includes(" — ")) {
+                const parts = rawSigns.split(" — ");
+                displaySigns = parts[0]?.trim() || rawSigns;
+                const tailNote = parts.slice(1).join(" — ").trim();
+                if (!displayNotes && tailNote) {
+                  displayNotes = tailNote;
+                }
+              }
+
+              return (
+                <div className="rounded border border-border bg-card p-4 space-y-3 shadow-xs">
+                  <h4 className="text-xs font-bold font-display uppercase tracking-wider text-muted-foreground">
+                    {t("observations.findings_title", "Ground Conditions & Visual Signs")}
+                  </h4>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="rounded border border-border/80 bg-secondary/30 p-2.5">
+                      <div className="text-[0.68rem] text-muted-foreground uppercase">{t("observations.visual_signs", "Visual Signs")}</div>
+                      <div className="font-semibold text-xs text-foreground mt-0.5">
+                        {displaySigns || "Slope movement / ground distress"}
+                      </div>
+                    </div>
+
+                    <div className="rounded border border-border/80 bg-secondary/30 p-2.5">
+                      <div className="text-[0.68rem] text-muted-foreground uppercase">{t("observations.road_impact", "Road Status")}</div>
+                      <div className="font-semibold text-xs text-foreground mt-0.5">
+                        {activeObs.road_status ? activeObs.road_status.toUpperCase() : "NORMAL / OPEN"}
+                      </div>
+                    </div>
+
+                    <div className="rounded border border-border/80 bg-secondary/30 p-2.5">
+                      <div className="text-[0.68rem] text-muted-foreground uppercase">{t("observations.local_rainfall", "Local Rainfall")}</div>
+                      <div className="font-semibold text-xs text-foreground mt-0.5">
+                        {activeObs.rainfall_mm !== null && activeObs.rainfall_mm !== undefined
+                          ? `${activeObs.rainfall_mm.toFixed(1)} mm`
+                          : "Not recorded"}
+                      </div>
+                    </div>
                   </div>
-                </div>
 
-                <div className="rounded border border-border/80 bg-secondary/30 p-2.5">
-                  <div className="text-[0.68rem] text-muted-foreground uppercase">{t("observations.road_impact", "Road Status")}</div>
-                  <div className="font-semibold text-xs text-foreground mt-0.5">
-                    {activeObs.road_status ? activeObs.road_status.toUpperCase() : "NORMAL / OPEN"}
-                  </div>
-                </div>
+                  {/* Dedicated Separate Block: Field Notes / Translated Observation */}
+                  {displayNotes && (
+                    <div className="space-y-1.5 pt-2 border-t border-border/70">
+                      <div className="flex items-center justify-between text-[0.68rem] font-semibold text-muted-foreground uppercase">
+                        <span className="flex items-center gap-1.5 text-primary">
+                          <span>💬 {t("observations.field_notes", "Field Description & Translated Message")}</span>
+                        </span>
+                        <span className="text-[0.6rem] font-mono text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
+                          ✓ Translated Observation
+                        </span>
+                      </div>
+                      <div className="text-xs text-foreground bg-secondary/20 p-3 rounded border border-border/80 leading-relaxed font-sans font-medium whitespace-pre-wrap">
+                        {displayNotes}
+                      </div>
+                    </div>
+                  )}
 
-                <div className="rounded border border-border/80 bg-secondary/30 p-2.5">
-                  <div className="text-[0.68rem] text-muted-foreground uppercase">{t("observations.local_rainfall", "Local Rainfall")}</div>
-                  <div className="font-semibold text-xs text-foreground mt-0.5">
-                    {activeObs.rainfall_mm !== null && activeObs.rainfall_mm !== undefined
-                      ? `${activeObs.rainfall_mm.toFixed(1)} mm`
-                      : "Not recorded"}
-                  </div>
+                  {/* Soil condition and notes */}
+                  {activeObs.soil_condition && (
+                    <div className="space-y-1 pt-1">
+                      <div className="text-[0.68rem] text-muted-foreground uppercase font-semibold">
+                        {t("observations.soil_condition", "Soil & Slope Notes")}
+                      </div>
+                      <div className="text-xs text-muted-foreground bg-secondary/20 p-2.5 rounded border border-border/60">
+                        {activeObs.soil_condition}
+                      </div>
+                    </div>
+                  )}
                 </div>
-              </div>
-
-              {/* Soil condition and notes */}
-              <div className="space-y-1 pt-1">
-                <div className="text-[0.68rem] text-muted-foreground uppercase font-semibold">
-                  {t("observations.soil_condition", "Soil & Slope Notes")}
-                </div>
-                <div className="text-xs text-muted-foreground bg-secondary/20 p-2.5 rounded border border-border/60">
-                  {activeObs.soil_condition || activeObs.verification_notes || "No additional commentary noted by field inspector."}
-                </div>
-              </div>
+              );
+            })()}
 
               {/* Attached Evidence Media (URLs, Offline Blobs, or Metadata) */}
               {(() => {
@@ -556,7 +593,6 @@ export function ObservationDetailsDialog({
                   </div>
                 );
               })()}
-            </div>
 
             {/* ── Official Review Card (role-gated) ── */}
             {canReview && (

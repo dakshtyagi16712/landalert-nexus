@@ -1280,22 +1280,50 @@ function ZonePage() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-mono mb-3 text-muted-foreground">
-                  {obs.rainfall_mm !== null && obs.rainfall_mm !== undefined && (
-                    <div>{t("zone_detail.label_rainfall")} <span className="text-foreground">{obs.rainfall_mm} mm/h</span></div>
-                  )}
-                  {obs.soil_condition && (
-                    <div>{t("zone_detail.label_soil")} <span className="text-foreground">{obs.soil_condition}</span></div>
-                  )}
-                  {obs.visual_signs && (
-                    <div className="col-span-2">{t("zone_detail.label_signs")} <span className="text-amber-300">{obs.visual_signs}</span></div>
-                  )}
-                  {obs.geo_lat && obs.geo_lng && (
-                    <div className="col-span-2 text-primary">
-                      {t("zone_detail.label_gps")} {obs.geo_lat.toFixed(4)}°N, {obs.geo_lng.toFixed(4)}°E (±{Math.round(obs.geo_accuracy_m || 0)}m)
-                    </div>
-                  )}
-                </div>
+                {(() => {
+                  const rawSigns = obs.visual_signs || "";
+                  let displaySigns = rawSigns;
+                  let displayNotes = (obs as any)?.notes || (obs as any)?.description || "";
+                  if (rawSigns.includes(" — ")) {
+                    const parts = rawSigns.split(" — ");
+                    displaySigns = parts[0]?.trim() || rawSigns;
+                    const tailNote = parts.slice(1).join(" — ").trim();
+                    if (!displayNotes && tailNote) {
+                      displayNotes = tailNote;
+                    }
+                  }
+
+                  return (
+                    <>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-mono mb-3 text-muted-foreground">
+                        {obs.rainfall_mm !== null && obs.rainfall_mm !== undefined && (
+                          <div>{t("zone_detail.label_rainfall")} <span className="text-foreground">{obs.rainfall_mm} mm/h</span></div>
+                        )}
+                        {obs.soil_condition && (
+                          <div>{t("zone_detail.label_soil")} <span className="text-foreground">{obs.soil_condition}</span></div>
+                        )}
+                        {displaySigns && (
+                          <div className="col-span-2">{t("zone_detail.label_signs")} <span className="text-amber-300 font-medium">{displaySigns}</span></div>
+                        )}
+                        {obs.geo_lat && obs.geo_lng && (
+                          <div className="col-span-2 text-primary">
+                            {t("zone_detail.label_gps")} {obs.geo_lat.toFixed(4)}°N, {obs.geo_lng.toFixed(4)}°E (±{Math.round(obs.geo_accuracy_m || 0)}m)
+                          </div>
+                        )}
+                      </div>
+
+                      {displayNotes && (
+                        <div className="mb-3 p-2.5 rounded bg-secondary/30 border border-border/70 text-xs">
+                          <div className="text-[0.65rem] font-mono uppercase text-primary mb-1 flex items-center justify-between">
+                            <span>💬 Field Note / Translated Message</span>
+                            <span className="text-emerald-400 bg-emerald-500/10 px-1 py-0.5 rounded text-[0.6rem]">✓ Translated</span>
+                          </div>
+                          <p className="font-medium text-foreground whitespace-pre-wrap">{displayNotes}</p>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
 
                 {obs.media_urls && obs.media_urls.length > 0 && (
                   <div>

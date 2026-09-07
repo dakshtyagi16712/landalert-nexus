@@ -10,7 +10,7 @@
  * 5. Strict offline data semantics: NO fabricated weather, ML, or alerts
  */
 
-const CACHE_NAME = "landalert-pwa-v957cb9d18b";
+const CACHE_NAME = "landalert-pwa-vfdf76d888d";
 const MAP_CACHE = "landalert-tiles-v1";
 const DATA_CACHE = "landalert-data-v1";
 
@@ -18,14 +18,14 @@ const PRECACHE_ASSETS = [
   "/",
   "/alerts",
   "/apple-touch-icon.png",
-  "/assets/ConsoleShell-DpXezy07.js",
-  "/assets/FieldObservationDialog-96WdnnkE.js",
+  "/assets/ConsoleShell-BZ5WDVyi.js",
+  "/assets/FieldObservationDialog-Dzk-NZAN.js",
   "/assets/MapCanvas-vA1mDULR.js",
   "/assets/RiskBits-Bajw7X3r.js",
   "/assets/RiskMap-CHKJ_wKy.js",
   "/assets/RiskMap-vh-t_kPv.css",
-  "/assets/alerts-Bnfi1lUd.js",
-  "/assets/alerts-CuqDAFTn.js",
+  "/assets/alerts-B_fFH45k.js",
+  "/assets/alerts-DPQ5-8t9.js",
   "/assets/atkinson-hyperlegible-latin-400-normal-BbWidj28.woff",
   "/assets/atkinson-hyperlegible-latin-400-normal-BrHNak5F.woff2",
   "/assets/atkinson-hyperlegible-latin-ext-400-normal-Bbz-b3yf.woff",
@@ -35,22 +35,22 @@ const PRECACHE_ASSETS = [
   "/assets/clock-CZi1VGNu.js",
   "/assets/dist-Btb5Jv1E.js",
   "/assets/geo-translations-B89rMh4-.js",
-  "/assets/index-COKz3QUI.js",
+  "/assets/index-BVpzq4z_.js",
   "/assets/lock--2AxhOJb.js",
-  "/assets/observations-Bnfi1lUd.js",
+  "/assets/observations-DPQ5-8t9.js",
   "/assets/offline-media-store-BX5QLo3w.js",
   "/assets/queryOptions-T1t5ds6z.js",
   "/assets/risk-CkQ7Hukn.js",
   "/assets/rolldown-runtime-B0Z9INg1.js",
   "/assets/route-Z0tX_F9o.js",
-  "/assets/routes-BOSZj99G.js",
-  "/assets/routes-Bnfi1lUd.js",
-  "/assets/styles-0D0x27iT.css",
+  "/assets/routes-BYHfKnRK.js",
+  "/assets/routes-DPQ5-8t9.js",
+  "/assets/styles-45FZf3IH.css",
   "/assets/textarea-7ji_QF3Q.js",
   "/assets/transformers-BGTKhuSD.js",
   "/assets/web-Dqf9dW0a.js",
-  "/assets/zones._id-Bnfi1lUd.js",
-  "/assets/zones._id-DivD45oC.js",
+  "/assets/zones._id-DPQ5-8t9.js",
+  "/assets/zones._id-FJ4XHk4A.js",
   "/emblem-of-india.svg",
   "/favicon.ico",
   "/favicon.svg",
